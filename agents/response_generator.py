@@ -13,10 +13,9 @@ class ResponseGeneratorAgent:
         pipe = load_llm_pipeline(temperature=0.8)
         self.llm = HuggingFacePipeline(pipeline=pipe)
         
-        # Prompts for different email categories
+        # Prompts for different email categories (string templates)
         self.prompts = {
-            "technical_support": ChatPromptTemplate.from_messages([
-                ("system", """You are a skilled technical support agent for TaskFlow Pro.
+            "technical_support": """You are a skilled technical support agent for TaskFlow Pro.
 
 Your task is to write a helpful, empathetic response to a customer's technical issue.
 
@@ -32,18 +31,15 @@ Guidelines:
 Context/Information to use:
 {context}
 
-Write a professional, friendly email response."""),
-                ("user", """Original Email:
+Original Email:
 From: {sender}
 Subject: {subject}
 
 {body}
 
-Please write a complete email response.""")
-            ]),
+Please write a complete email response.""",
             
-            "product_inquiry": ChatPromptTemplate.from_messages([
-                ("system", """You are a knowledgeable product specialist for TaskFlow Pro.
+            "product_inquiry": """You are a knowledgeable product specialist for TaskFlow Pro.
 
 Your task is to answer the customer's product questions clearly and helpfully.
 
@@ -59,18 +55,15 @@ Guidelines:
 Context/Information:
 {context}
 
-Write a professional, informative email response."""),
-                ("user", """Original Email:
+Original Email:
 From: {sender}
 Subject: {subject}
 
 {body}
 
-Please write a complete email response.""")
-            ]),
+Please write a complete email response.""",
             
-            "billing": ChatPromptTemplate.from_messages([
-                ("system", """You are a helpful billing specialist for TaskFlow Pro.
+            "billing": """You are a helpful billing specialist for TaskFlow Pro.
 
 Your task is to address the customer's billing question or concern.
 
@@ -86,18 +79,15 @@ Guidelines:
 Context/Information:
 {context}
 
-Write a professional, clear email response."""),
-                ("user", """Original Email:
+Original Email:
 From: {sender}
 Subject: {subject}
 
 {body}
 
-Please write a complete email response.""")
-            ]),
+Please write a complete email response.""",
             
-            "feature_request": ChatPromptTemplate.from_messages([
-                ("system", """You are an enthusiastic product team member for TaskFlow Pro.
+            "feature_request": """You are an enthusiastic product team member for TaskFlow Pro.
 
 Your task is to respond to a customer's feature request or suggestion.
 
@@ -113,18 +103,15 @@ Guidelines:
 Context/Information:
 {context}
 
-Write a professional, appreciative email response."""),
-                ("user", """Original Email:
+Original Email:
 From: {sender}
 Subject: {subject}
 
 {body}
 
-Please write a complete email response.""")
-            ]),
+Please write a complete email response.""",
             
-            "feedback": ChatPromptTemplate.from_messages([
-                ("system", """You are a responsive customer success agent for TaskFlow Pro.
+            "feedback": """You are a responsive customer success agent for TaskFlow Pro.
 
 Your task is to acknowledge and respond to customer feedback.
 
@@ -140,15 +127,13 @@ Guidelines:
 Context/Information:
 {context}
 
-Write a professional, sincere email response."""),
-                ("user", """Original Email:
+Original Email:
 From: {sender}
 Subject: {subject}
 
 {body}
 
-Please write a complete email response.""")
-            ])
+Please write a complete email response."""
         }
     
     def generate_response(
@@ -184,21 +169,22 @@ Please write a complete email response.""")
         else:
             context_text = "No additional context provided. Use your general knowledge of TaskFlow Pro."
         
-        # Generate response
-        chain = prompt | self.llm
-        response = chain.invoke({
-            "sender": email_data.get("sender", "Valued Customer"),
-            "subject": email_data.get("subject", "Your inquiry"),
-            "body": email_data.get("body", ""),
-            "context": context_text
-        })
+        # Format prompt with data
+        formatted_prompt = prompt.format(
+            sender=email_data.get("sender", "Valued Customer"),
+            subject=email_data.get("subject", "Your inquiry"),
+            body=email_data.get("body", ""),
+            context=context_text
+        )
         
-        return response.content
+        # Generate response
+        response = self.llm.invoke(formatted_prompt)
+        
+        return response
     
-    def _get_general_prompt(self) -> ChatPromptTemplate:
+    def _get_general_prompt(self) -> str:
         """Get a general-purpose response prompt."""
-        return ChatPromptTemplate.from_messages([
-            ("system", """You are a helpful support agent for TaskFlow Pro.
+        return """You are a helpful support agent for TaskFlow Pro.
 
 Your task is to write a professional, helpful response to the customer's email.
 
@@ -212,15 +198,13 @@ Guidelines:
 Context/Information:
 {context}
 
-Write a professional email response."""),
-            ("user", """Original Email:
+Original Email:
 From: {sender}
 Subject: {subject}
 
 {body}
 
-Please write a complete email response.""")
-        ])
+Please write a complete email response."""
     
     def add_signature(self, email_body: str, agent_name: str = "TaskFlow Support Team") -> str:
         """

@@ -41,9 +41,8 @@ class QAAgent:
         
         self.parser = PydanticOutputParser(pydantic_object=QAResult)
         
-        # Create QA prompt
-        self.prompt = ChatPromptTemplate.from_messages([
-            ("system", """You are a quality assurance specialist for customer support emails at TaskFlow Pro.
+        # Create QA prompt (string template)
+        self.prompt = """You are a quality assurance specialist for customer support emails at TaskFlow Pro.
 
 Your task is to review generated email responses and ensure they meet our quality standards.
 
@@ -63,8 +62,9 @@ Approval Guidelines:
 
 When rejecting, provide specific issues and actionable suggestions for improvement.
 
-{format_instructions}"""),
-            ("user", """Please review this email response:
+{format_instructions}
+
+Please review this email response:
 
 Original Customer Email:
 From: {sender}
@@ -81,8 +81,7 @@ Generated Response:
 
 ---
 
-Please evaluate this response thoroughly.""")
-        ])
+Please evaluate this response thoroughly."""
     
     def review(
         self,
@@ -106,19 +105,48 @@ Please evaluate this response thoroughly.""")
         Returns:
             QAResult object with evaluation
         """
-        # Create the chain
-        chain = self.prompt | self.llm | self.parser
+        # Format the prompt
+        formatted_prompt = self.prompt.format(
+            format_instructions=self.parser.get_format_instructions(),
+            sender=original_email.get("sender", "Unknown"),
+            subject=original_email.get("subject", "No subject"),
+            category=category,
+            priority=priority,
+            customer_body=original_email.get("body", ""),
+            response=generated_response
+        )
         
-        # Run review
-        result = chain.invoke({
-            "format_instructions": self.parser.get_format_instructions(),
-            "sender": original_email.get("sender", "Unknown"),
-            "subject": original_email.get("subject", "No subject"),
-            "category": category,
-            "priority": priority,
-            "customer_body": original_email.get("body", ""),
-            "response": generated_response
-        })
+        # Get LLM response
+        llm_response = self.llm.invoke(formatted_prompt)
+        
+        # Parse the response
+        try:
+            # Try to extract JSON from the response
+            json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', llm_response, re.DOTALL)
+            if json_match:
+                json_str = json_match.group()
+                result_dict = json.loads(json_str)
+                result = QAResult(**result_dict)
+            else:
+                # Fallback: create a default rejection result
+                result = QAResult(
+                    approved=False,
+                    quality_score=5.0,
+                    issues=["Failed to parse QA result"],
+                    suggestions=["Manual review required"],
+                    tone_assessment="Unable to assess",
+                    reasoning="Parser failed to extract structured data from QA response"
+                )
+        except Exception as e:
+            print(f"Error parsing QA result: {e}")
+            result = QAResult(
+                approved=False,
+                quality_score=5.0,
+                issues=[f"Parsing error: {str(e)}"],
+                suggestions=["Manual review required"],
+                tone_assessment="Unable to assess",
+                reasoning="Error occurred during quality assessment"
+            )
         
         return result
     
