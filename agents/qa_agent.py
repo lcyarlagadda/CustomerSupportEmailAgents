@@ -59,17 +59,13 @@ SCORING:
 - 4-6: Needs improvement, reject
 - 0-3: Poor, reject
 
-EXAMPLE EVALUATION:
+EXAMPLE OF A POOR RESPONSE:
+Response: "We received your message."
+Evaluation: {{"approved": false, "quality_score": 2.5, "issues": ["Too brief"], "suggestions": ["Add details"], "tone_assessment": "Generic", "reasoning": "No help provided"}}
 
-Response: "Thanks for contacting us. We'll look into it."
-{{
-  "approved": false,
-  "quality_score": 3.0,
-  "issues": ["Too vague", "No specific help", "Lacks empathy"],
-  "suggestions": ["Provide specific steps", "Show understanding"],
-  "tone_assessment": "Too brief and impersonal",
-  "reasoning": "Response doesn't address the customer's specific issue"
-}}
+EXAMPLE OF A GOOD RESPONSE:
+Response: "Thank you for reaching out. Here are 3 steps to fix your issue: 1) Clear cache, 2) Restart app, 3) Contact us if needed. Best regards, Support Team"
+Evaluation: {{"approved": true, "quality_score": 8.5, "issues": [], "suggestions": [], "tone_assessment": "Professional and helpful", "reasoning": "Clear steps provided"}}
 
 NOW REVIEW THIS EMAIL:
 

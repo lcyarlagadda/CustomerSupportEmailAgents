@@ -211,6 +211,13 @@ class SupportWorkflow:
         state["draft_response"] = final_response
         print("Response generated")
         
+        # Show response preview
+        print("\n" + "─" * 70)
+        print("GENERATED RESPONSE:")
+        print("─" * 70)
+        print(final_response)
+        print("─" * 70)
+        
         return state
     
     def quality_check(self, state: SupportState) -> SupportState:

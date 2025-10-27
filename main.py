@@ -65,11 +65,12 @@ def print_classification(state: dict):
 
 def print_response(state: dict):
     """Print generated response."""
-    if state.get('final_response'):
+    response = state.get('final_response') or state.get('draft_response')
+    if response:
         print("=" * 70)
         print("✉️  GENERATED RESPONSE")
         print("=" * 70)
-        print(state['final_response'])
+        print(response)
         print("=" * 70 + "\n")
 
 
