@@ -97,18 +97,28 @@ Respond ONLY with valid JSON matching the schema above."""
         
         # Extract JSON from response
         try:
-            # Try to find JSON in the response
-            json_match = re.search(r'\{[^}]+\}', response, re.DOTALL)
+            # Try to find JSON in the response (improved regex for nested objects)
+            json_match = re.search(r'\{(?:[^{}]|(?:\{[^{}]*\}))*\}', response, re.DOTALL)
             if json_match:
                 json_str = json_match.group()
                 result_dict = json.loads(json_str)
                 return EmailClassification(**result_dict)
             else:
-                # Fallback: parse directly
-                return self.parser.parse(response)
-        except Exception as e:
-            print(f"Error parsing classification: {e}")
+                # Try to parse the entire response
+                result_dict = json.loads(response)
+                return EmailClassification(**result_dict)
+        except json.JSONDecodeError as e:
+            print(f"Error parsing classification JSON: {e}")
+            print(f"Response preview: {response[:200]}...")
             # Return default classification
+            return EmailClassification(
+                category="product_inquiry",
+                confidence=0.5,
+                reasoning="Failed to parse LLM response",
+                priority="medium"
+            )
+        except Exception as e:
+            print(f"Error creating classification: {e}")
             return EmailClassification(
                 category="product_inquiry",
                 confidence=0.5,

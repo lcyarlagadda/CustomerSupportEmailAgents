@@ -45,10 +45,19 @@ def load_llm_pipeline(temperature=None):
     hf_token = os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_TOKEN")
     
     try:
+        # Load tokenizer first to configure pad token
+        print("Loading tokenizer...")
+        tokenizer = AutoTokenizer.from_pretrained(LLM_MODEL, token=hf_token)
+        
+        # Set pad token to suppress warnings
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+        
         # Load pipeline with appropriate settings for Colab
         _pipeline_cache = pipeline(
             "text-generation",
             model=LLM_MODEL,
+            tokenizer=tokenizer,
             device=device if device == "cuda" else -1,  # -1 for CPU
             token=hf_token,
             torch_dtype=torch.float16 if device == "cuda" else torch.float32,
@@ -56,6 +65,7 @@ def load_llm_pipeline(temperature=None):
             do_sample=True,
             temperature=temp,
             top_p=0.9,
+            pad_token_id=tokenizer.eos_token_id,  # Set pad token ID
         )
         
         print(f"Model loaded successfully on {device}")

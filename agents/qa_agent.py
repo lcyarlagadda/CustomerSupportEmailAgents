@@ -121,24 +121,30 @@ Please evaluate this response thoroughly."""
         
         # Parse the response
         try:
-            # Try to extract JSON from the response
-            json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', llm_response, re.DOTALL)
+            # Try to extract JSON from the response (improved regex)
+            json_match = re.search(r'\{(?:[^{}]|(?:\{[^{}]*\}))*\}', llm_response, re.DOTALL)
             if json_match:
                 json_str = json_match.group()
                 result_dict = json.loads(json_str)
                 result = QAResult(**result_dict)
             else:
-                # Fallback: create a default rejection result
-                result = QAResult(
-                    approved=False,
-                    quality_score=5.0,
-                    issues=["Failed to parse QA result"],
-                    suggestions=["Manual review required"],
-                    tone_assessment="Unable to assess",
-                    reasoning="Parser failed to extract structured data from QA response"
-                )
+                # Try parsing the entire response
+                result_dict = json.loads(llm_response)
+                result = QAResult(**result_dict)
+        except json.JSONDecodeError as e:
+            print(f"Error parsing QA JSON: {e}")
+            print(f"Response preview: {llm_response[:300]}...")
+            # Fallback: create a default result
+            result = QAResult(
+                approved=False,
+                quality_score=5.0,
+                issues=["Failed to parse QA result - LLM did not return valid JSON"],
+                suggestions=["Manual review required"],
+                tone_assessment="Unable to assess",
+                reasoning="Parser failed to extract structured data from QA response"
+            )
         except Exception as e:
-            print(f"Error parsing QA result: {e}")
+            print(f"Error creating QA result: {e}")
             result = QAResult(
                 approved=False,
                 quality_score=5.0,
@@ -198,12 +204,12 @@ Please evaluate this response thoroughly."""
         """
         issues = []
         
-        # Check length
+        # Check length (more reasonable limits)
         if len(response) < 50:
             issues.append("Response is too short")
         
-        if len(response) > 5000:
-            issues.append("Response is too long")
+        if len(response) > 2000:
+            issues.append("Response is too long (consider being more concise)")
         
         # Check for placeholder text
         placeholders = ["[PLACEHOLDER]", "[TODO]", "[INSERT", "XXX", "TBD"]
