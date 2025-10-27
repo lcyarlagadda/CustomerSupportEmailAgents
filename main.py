@@ -9,10 +9,15 @@ This script:
 import sys
 import time
 import os
+import logging
 from pathlib import Path
 
-# Suppress ChromaDB telemetry warnings
+# Suppress ChromaDB telemetry warnings (must be set before importing chromadb)
 os.environ['ANONYMIZED_TELEMETRY'] = 'False'
+os.environ['CHROMA_TELEMETRY'] = 'False'
+
+# Suppress ChromaDB telemetry errors in logs
+logging.getLogger('chromadb.telemetry.product.posthog').setLevel(logging.CRITICAL)
 
 # # Add project root to path
 # sys.path.insert(0, str(Path(__file__).parent))
