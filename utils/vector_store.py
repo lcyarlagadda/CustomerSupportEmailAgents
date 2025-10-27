@@ -25,10 +25,12 @@ class VectorStoreManager:
     
     def __init__(self):
         """Initialize the vector store manager."""
+        # Use local embeddings - no token needed for public models
         self.embeddings = HuggingFaceEmbeddings(
             model_name=EMBEDDING_MODEL,
             model_kwargs={'device': 'cpu'},
-            encode_kwargs={'normalize_embeddings': True}
+            encode_kwargs={'normalize_embeddings': True},
+            cache_folder=None
         )
         self.vectorstore = None
         self.text_splitter = RecursiveCharacterTextSplitter(
