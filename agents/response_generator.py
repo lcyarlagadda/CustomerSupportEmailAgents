@@ -15,66 +15,45 @@ class ResponseGeneratorAgent:
         
         # Prompts for different email categories (string templates)
         self.prompts = {
-            "technical_support": """Customer Email - From: {sender}, Subject: {subject}
-Body: {body}
+            "technical_support": """Customer Email: {subject}
+{body}
 
-Context: {context}
+Available Info: {context}
 
-Write ONLY an email response (200-400 words) that:
-- Shows empathy and acknowledges frustration
-- Provides 3-5 clear troubleshooting steps
-- Offers 2-3 solutions
-- Ends with reassurance
-
-Start with "Dear" or "Hi". Output ONLY the email, no explanations.""",
+Write ONLY the email body (200-400 words). Start with greeting, end BEFORE signature. 
+DO NOT include: [placeholders], notes, explanations, signature, or "please let me know".""",
             
-            "product_inquiry": """Customer Email - From: {sender}, Subject: {subject}
-Body: {body}
+            "product_inquiry": """Customer Email: {subject}
+{body}
 
-Context: {context}
+Available Info: {context}
 
-Write ONLY an email response (200-350 words) that:
-- Answers questions directly and accurately
-- Uses bullet points for features
-- Suggests next steps
-
-Start with "Dear" or "Hi". Output ONLY the email, no explanations.""",
+Write ONLY the email body (200-350 words). Start with greeting, end BEFORE signature.
+DO NOT include: [placeholders], notes, explanations, signature, or "please let me know".""",
             
-            "billing": """Customer Email - From: {sender}, Subject: {subject}
-Body: {body}
+            "billing": """Customer Email: {subject}
+{body}
 
-Context: {context}
+Available Info: {context}
 
-Write ONLY an email response (150-300 words) that:
-- Is clear and transparent
-- Shows empathy
-- Provides specific next steps
-
-Start with "Dear" or "Hi". Output ONLY the email, no explanations.""",
+Write ONLY the email body (150-300 words). Start with greeting, end BEFORE signature.
+DO NOT include: [placeholders], notes, explanations, signature, or "please let me know".""",
             
-            "feature_request": """Customer Email - From: {sender}, Subject: {subject}
-Body: {body}
+            "feature_request": """Customer Email: {subject}
+{body}
 
-Context: {context}
+Available Info: {context}
 
-Write ONLY an email response (150-250 words) that:
-- Thanks them sincerely
-- Explains if similar features exist
-- Suggests workarounds if available
-
-Start with "Dear" or "Hi". Output ONLY the email, no explanations.""",
+Write ONLY the email body (150-250 words). Start with greeting, end BEFORE signature.
+DO NOT include: [placeholders], notes, explanations, signature, or "please let me know".""",
             
-            "feedback": """Customer Email - From: {sender}, Subject: {subject}
-Body: {body}
+            "feedback": """Customer Email: {subject}
+{body}
 
-Context: {context}
+Available Info: {context}
 
-Write ONLY an email response (100-200 words) that:
-- Thanks them for feedback
-- Shows appreciation (positive) or apologizes (negative)
-- Invites ongoing communication
-
-Start with "Dear" or "Hi". Output ONLY the email, no explanations."""
+Write ONLY the email body (100-200 words). Start with greeting, end BEFORE signature.
+DO NOT include: [placeholders], notes, explanations, signature, or "please let me know"."""
         }
     
     def generate_response(
@@ -159,51 +138,49 @@ Start with "Dear" or "Hi". Output ONLY the email, no explanations."""
                     response = response[idx:]
                 break
         
-        # Remove any trailing meta-commentary (text after signature)
+        # Find the FIRST signature and cut there (we'll add our own later)
         signature_markers = [
             "Best regards,",
             "Sincerely,",
             "Best,",
+            "Warm regards,",
+            "Kind regards,",
             "Regards,",
-            "TaskFlow Support Team",
-            "TaskFlow Pro Support"
+            "Thank you,",
         ]
         
-        # Find the last signature and cut after it
-        last_sig_pos = -1
-        last_sig_len = 0
+        # Find the FIRST signature position
+        first_sig_pos = len(response)
         for marker in signature_markers:
-            pos = response.rfind(marker)
-            if pos > last_sig_pos:
-                last_sig_pos = pos
-                last_sig_len = len(marker)
+            pos = response.find(marker)
+            if pos > 0 and pos < first_sig_pos:
+                first_sig_pos = pos
         
-        if last_sig_pos > 0:
-            # Keep text up to 100 chars after the signature (for closing lines)
-            end_pos = last_sig_pos + last_sig_len + 100
-            potential_end = response[last_sig_pos:end_pos]
-            
-            # Find where the meta-commentary starts
-            meta_markers = [
-                "\n\nThis response",
-                "\n\nThe response",
-                "\n\nNote:",
-                "\n\nI hope",
-                "\n\nPlease note",
-                "Use the relevant information"
-            ]
-            
-            for meta_marker in meta_markers:
-                if meta_marker in potential_end:
-                    meta_pos = potential_end.find(meta_marker)
-                    response = response[:last_sig_pos + meta_pos]
-                    break
-            else:
-                # No meta-commentary found, keep reasonable amount after signature
-                lines_after = response[last_sig_pos + last_sig_len:].split('\n')
-                # Keep at most 3 lines after signature
-                if len(lines_after) > 3:
-                    response = response[:last_sig_pos + last_sig_len] + '\n'.join(lines_after[:3])
+        # Cut at first signature
+        if first_sig_pos < len(response):
+            response = response[:first_sig_pos].rstrip()
+        
+        # Remove placeholder text (like [Your Name], [Phone], etc.)
+        import re
+        response = re.sub(r'\[Your [^\]]+\]', '', response)
+        response = re.sub(r'\[Your [^\]]+\]\s*\(optional\)', '', response)
+        response = re.sub(r'\(optional\)', '', response)
+        
+        # Remove meta-commentary and notes
+        meta_patterns = [
+            r'\n\nNote:.*$',
+            r'\n\nPlease note.*$',
+            r'\n\nPlease let me know.*$',
+            r'\n\nThis response.*$',
+            r'\n\nThe response.*$',
+            r'\n\nI hope this.*$',
+            r'\n\nFeel free to.*$',
+            r'\n\nIf you need any modifications.*$',
+            r'\n\n---.*$',  # Remove trailing separators
+        ]
+        
+        for pattern in meta_patterns:
+            response = re.sub(pattern, '', response, flags=re.DOTALL | re.IGNORECASE)
         
         # Remove any remaining prompt artifacts
         prompt_artifacts = [
@@ -213,7 +190,8 @@ Start with "Dear" or "Hi". Output ONLY the email, no explanations."""
             "Context/Information to use:",
             "Original Email:",
             "Write a complete but CONCISE",
-            "Use the relevant information from"
+            "Use the relevant information from",
+            "Customer Email -"
         ]
         
         for artifact in prompt_artifacts:
@@ -225,34 +203,45 @@ Start with "Dear" or "Hi". Output ONLY the email, no explanations."""
                         response = '\n'.join(lines[i:])
                         break
         
+        # Clean up extra whitespace
+        lines = response.split('\n')
+        cleaned_lines = []
+        for line in lines:
+            stripped = line.strip()
+            if stripped:  # Keep non-empty lines
+                cleaned_lines.append(line)
+        
+        response = '\n'.join(cleaned_lines)
+        
         return response.strip()
     
     def _get_general_prompt(self) -> str:
         """Get a general-purpose response prompt."""
-        return """Customer Email - From: {sender}, Subject: {subject}
-Body: {body}
+        return """Customer Email: {subject}
+{body}
 
-Context: {context}
+Available Info: {context}
 
-Write ONLY an email response (200-400 words) that:
-- Is professional and helpful
-- Addresses their concerns directly
-- Provides next steps
-- Shows empathy
-
-Start with "Dear" or "Hi". Output ONLY the email, no explanations."""
+Write ONLY the email body (200-400 words). Start with greeting, end BEFORE signature.
+DO NOT include: [placeholders], notes, explanations, signature, or "please let me know"."""
     
     def add_signature(self, email_body: str, agent_name: str = "TaskFlow Support Team") -> str:
         """
         Add a professional signature to the email.
         
         Args:
-            email_body: The email body content
+            email_body: The email body content (should NOT already have a signature)
             agent_name: Name to sign with
         
         Returns:
             Email with signature
         """
+        # Ensure body doesn't already have a signature
+        signature_check = ["Best regards", "Sincerely", "TaskFlow Support"]
+        if any(sig in email_body for sig in signature_check):
+            # Already has signature, don't add another
+            return email_body
+        
         signature = f"""
 
 Best regards,

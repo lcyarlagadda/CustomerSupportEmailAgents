@@ -792,6 +792,33 @@ class MockEmailHandler:
         print("[MOCK] (Email not actually sent in mock mode)\n")
         return True
     
+    def send_reply(self, email: Email, reply_body: str, subject: str = None):
+        """
+        Simulate sending a reply email.
+        
+        Args:
+            email: Original email to reply to
+            reply_body: Body of the reply
+            subject: Optional subject (defaults to Re: original subject)
+        """
+        reply_subject = subject or f"Re: {email.subject}"
+        
+        # Extract email address from sender
+        to_email = email.sender
+        if '<' in to_email:
+            to_email = to_email.split('<')[1].split('>')[0]
+        
+        print(f"\n" + "=" * 60)
+        print("[MOCK] SENDING EMAIL REPLY")
+        print("=" * 60)
+        print(f"To: {to_email}")
+        print(f"Subject: {reply_subject}")
+        print(f"Thread ID: {getattr(email, 'thread_id', email.id)}")
+        print("-" * 60)
+        print(reply_body[:200] + "..." if len(reply_body) > 200 else reply_body)
+        print("=" * 60)
+        print("[MOCK] (Email not actually sent in mock mode)\n")
+    
     def mark_as_read(self, email_id: str) -> bool:
         """
         Simulate marking email as read.
@@ -803,6 +830,20 @@ class MockEmailHandler:
             Always True (simulated success)
         """
         print(f"[MOCK] Marked email {email_id} as read")
+        return True
+    
+    def add_label(self, email_id: str, label_name: str) -> bool:
+        """
+        Simulate adding a label to an email.
+        
+        Args:
+            email_id: Email ID
+            label_name: Name of label to add
+        
+        Returns:
+            Always True (simulated success)
+        """
+        print(f"[MOCK] Added label '{label_name}' to email {email_id}")
         return True
 
 
