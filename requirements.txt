@@ -7,6 +7,7 @@ langgraph==0.2.45
 # HuggingFace for LLM and Embeddings (free, works on Colab)
 transformers==4.45.0
 torch==2.5.1
+torchvision==0.20.1  # Must match torch version
 accelerate==1.0.1
 
 # Vector Store and Local Embeddings

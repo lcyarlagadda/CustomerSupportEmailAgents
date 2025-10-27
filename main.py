@@ -14,7 +14,7 @@ from pathlib import Path
 # sys.path.insert(0, str(Path(__file__).parent))
 
 from utils.config import validate_config, GMAIL_EMAIL, CHECK_INTERVAL_SECONDS
-from utils.email_handler import GmailHandler
+from utils.email_handler import GmailHandler, MockEmailHandler
 from workflows.support_workflow import SupportWorkflow
 
 
@@ -172,6 +172,11 @@ def main():
         default=2,
         help="Maximum number of response revisions (default: 2)"
     )
+    parser.add_argument(
+        "--mock-emails",
+        action="store_true",
+        help="Use mock emails instead of real Gmail (useful for testing/Colab)"
+    )
     
     args = parser.parse_args()
     
@@ -190,7 +195,13 @@ def main():
     
     try:
         print("Initializing support system...")
-        email_handler = GmailHandler(GMAIL_EMAIL)
+        
+        # Choose email handler based on mode
+        if args.mock_emails:
+            email_handler = MockEmailHandler(GMAIL_EMAIL)
+        else:
+            email_handler = GmailHandler(GMAIL_EMAIL)
+        
         workflow = SupportWorkflow(max_revisions=args.max_revisions)
         print("System initialized\n")
     except Exception as e:

@@ -3,7 +3,7 @@ import os
 import time
 import pickle
 import base64
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from datetime import datetime
 from dataclasses import dataclass
 from email.mime.text import MIMEText
@@ -72,7 +72,48 @@ class GmailHandler:
                 print(f"Using credentials from: {GMAIL_CREDENTIALS_FILE}")
                 flow = InstalledAppFlow.from_client_secrets_file(
                     GMAIL_CREDENTIALS_FILE, SCOPES)
-                creds = flow.run_local_server(port=0)
+                
+                # Check if running in headless environment (Colab, server, etc.)
+                try:
+                    import webbrowser
+                    webbrowser.get()
+                    is_headless = False
+                except:
+                    is_headless = True
+                
+                # Also check for common headless indicators
+                if not is_headless:
+                    import sys
+                    is_colab = 'google.colab' in sys.modules
+                    is_headless = is_colab or not os.environ.get('DISPLAY')
+                
+                if is_headless:
+                    print("\n" + "="*60)
+                    print("HEADLESS ENVIRONMENT DETECTED (Colab/Server)")
+                    print("="*60)
+                    print("\nManual authentication required.")
+                    print("\nSteps:")
+                    print("1. Open the URL below in your browser")
+                    print("2. Sign in and authorize the app")
+                    print("3. Copy the authorization code from the URL")
+                    print("4. Paste it below when prompted")
+                    print("="*60 + "\n")
+                    
+                    # Get authorization URL
+                    flow.redirect_uri = 'urn:ietf:wg:oauth:2.0:oob'
+                    auth_url, _ = flow.authorization_url(prompt='consent')
+                    
+                    print(f"Authorization URL:\n{auth_url}\n")
+                    print("="*60)
+                    
+                    # Get authorization code from user
+                    auth_code = input("\nEnter the authorization code: ").strip()
+                    
+                    # Exchange code for credentials
+                    flow.fetch_token(code=auth_code)
+                    creds = flow.credentials
+                else:
+                    creds = flow.run_local_server(port=0)
             
             with open(GMAIL_TOKEN_FILE, 'wb') as token:
                 pickle.dump(creds, token)
@@ -373,6 +414,161 @@ def create_gmail_service():
     
     return build('gmail', 'v1', credentials=creds)
 """
+
+
+class MockEmailHandler:
+    """Mock email handler that returns sample emails for testing/demo purposes."""
+    
+    def __init__(self, email_address: str):
+        """
+        Initialize mock handler.
+        
+        Args:
+            email_address: Email address (not used, for compatibility)
+        """
+        self.email_address = email_address
+        self.mock_emails = self._create_mock_emails()
+        self.email_returned = False
+        print("\n" + "="*60)
+        print("MOCK EMAIL MODE - Using Sample Emails")
+        print("="*60)
+        print("No Gmail authentication required.")
+        print(f"Using {len(self.mock_emails)} pre-generated sample emails.")
+        print("="*60 + "\n")
+    
+    def _create_mock_emails(self) -> List[Email]:
+        """Create mock emails for testing."""
+        return [
+            Email(
+                id="email_001",
+                sender="john.doe@example.com",
+                subject="Can't login to my account",
+                body="""Hi TaskFlow Support,
+
+I've been trying to login to my account for the past hour but I keep getting an "Invalid password" error. I'm sure I'm using the correct password. I've tried resetting it twice but I'm not receiving the password reset emails.
+
+This is urgent as I have a project deadline today and need to access my tasks.
+
+Please help!
+
+Thanks,
+John""",
+                received_time="2024-01-15 09:30:00"
+            ),
+            Email(
+                id="email_002",
+                sender="sarah.smith@company.com",
+                subject="Question about team collaboration features",
+                body="""Hello,
+
+I'm considering TaskFlow Pro for my team of 15 people. I have a few questions:
+
+1. Does TaskFlow support real-time collaboration on tasks?
+2. Can we set different permission levels for team members?
+3. Is there a limit on the number of projects we can create?
+4. What's included in the team plan pricing?
+
+Looking forward to your response.
+
+Best regards,
+Sarah Smith
+Project Manager""",
+                received_time="2024-01-15 10:15:00"
+            ),
+            Email(
+                id="email_003",
+                sender="mike.johnson@startup.io",
+                subject="Charged twice this month",
+                body="""Hi Support Team,
+
+I noticed I was charged twice for my Pro subscription this month. I can see two charges of $29.99 on January 3rd and January 5th.
+
+My subscription should only be billed once per month. Can you please investigate this and issue a refund for the duplicate charge?
+
+Transaction IDs:
+- TXN_001234567
+- TXN_001234890
+
+Thanks,
+Mike Johnson
+mike.johnson@startup.io""",
+                received_time="2024-01-15 11:00:00"
+            ),
+            Email(
+                id="email_004",
+                sender="lisa.chen@tech.com",
+                subject="Feature request: Dark mode",
+                body="""Hey TaskFlow team,
+
+Love your product! I've been using it daily for the past 3 months.
+
+Would it be possible to add a dark mode option? I work late hours and the bright interface can be a bit harsh on the eyes.
+
+I know many other users would appreciate this feature too. I saw several requests for it in your community forum.
+
+Keep up the great work!
+
+Lisa""",
+                received_time="2024-01-15 11:30:00"
+            ),
+            Email(
+                id="email_005",
+                sender="david.brown@enterprise.com",
+                subject="Great experience with TaskFlow!",
+                body="""Hi,
+
+I just wanted to share some positive feedback. We've been using TaskFlow Pro for our entire department (50+ users) for the past 6 months, and it's been fantastic.
+
+The interface is intuitive, the mobile app works great, and the customer support has been excellent. We've had a few questions along the way and your team has always been quick to respond.
+
+We're recommending TaskFlow to other departments in our company.
+
+Thank you!
+
+David Brown
+IT Manager""",
+                received_time="2024-01-15 12:00:00"
+            )
+        ]
+    
+    def check_new_emails(self) -> List[Email]:
+        """Return mock emails (only once per run)."""
+        if not self.email_returned:
+            self.email_returned = True
+            return self.mock_emails
+        return []
+    
+    def send_email(self, to: str, subject: str, body: str, reply_to_id: Optional[str] = None) -> bool:
+        """
+        Simulate sending an email.
+        
+        Args:
+            to: Recipient email
+            subject: Email subject
+            body: Email body
+            reply_to_id: ID of email being replied to
+        
+        Returns:
+            Always True (simulated success)
+        """
+        print(f"\n[MOCK] Would send email to: {to}")
+        print(f"[MOCK] Subject: {subject}")
+        print(f"[MOCK] Body preview: {body[:100]}...")
+        print("[MOCK] (Email not actually sent in mock mode)\n")
+        return True
+    
+    def mark_as_read(self, email_id: str) -> bool:
+        """
+        Simulate marking email as read.
+        
+        Args:
+            email_id: Email ID
+        
+        Returns:
+            Always True (simulated success)
+        """
+        print(f"[MOCK] Marked email {email_id} as read")
+        return True
 
 
 if __name__ == "__main__":
