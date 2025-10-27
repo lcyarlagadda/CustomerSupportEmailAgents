@@ -1,0 +1,7 @@
+{
+  "id": "email_007",
+  "sender": "compliance@corp.com",
+  "subject": "Data export for compliance audit",
+  "body": "Dear TaskFlow Support,\n\nWe need to export all our company data from TaskFlow for a compliance audit. This includes:\n\n- All task histories\n- User activity logs\n- Attachments and documents\n- Comments and discussions\n\nCan you provide instructions on how to do a complete data export? Is there a bulk export feature?\n\nThis is time-sensitive as our audit is scheduled for next week.\n\nRegards,\nJennifer Martinez\nCompliance Officer"
+}
+

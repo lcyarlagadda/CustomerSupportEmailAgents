@@ -3,10 +3,13 @@ import os
 import time
 import pickle
 import base64
+import re
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from dataclasses import dataclass
 from email.mime.text import MIMEText
+from html import unescape
+from html.parser import HTMLParser
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -17,6 +20,22 @@ from googleapiclient.errors import HttpError
 from utils.config import GMAIL_CREDENTIALS_FILE, GMAIL_TOKEN_FILE
 
 SCOPES = ['https://www.googleapis.com/auth/gmail.modify']
+
+
+class HTMLStripper(HTMLParser):
+    """Strip HTML tags from text."""
+    def __init__(self):
+        super().__init__()
+        self.reset()
+        self.strict = False
+        self.convert_charrefs = True
+        self.text = []
+    
+    def handle_data(self, d):
+        self.text.append(d)
+    
+    def get_data(self):
+        return ''.join(self.text)
 
 
 @dataclass
@@ -218,91 +237,218 @@ Special limited time offer!!!!
             )
         ]
     
-    def check_new_emails(self) -> List[Email]:
+    def check_new_emails(self, max_results: int = 10, label: str = 'INBOX') -> List[Email]:
         """
         Check for new unread emails from Gmail.
+        
+        Args:
+            max_results: Maximum number of emails to fetch
+            label: Gmail label to filter by (default: INBOX)
         
         Returns:
             List of new emails
         """
         try:
+            # Query for unread emails in specified label
+            query = f'is:unread label:{label}'
+            
             results = self.service.users().messages().list(
                 userId='me',
-                q='is:unread in:inbox',
-                maxResults=10
+                q=query,
+                maxResults=max_results
             ).execute()
             
             messages = results.get('messages', [])
             
             if not messages:
+                print("No new emails found.")
                 return []
+            
+            print(f"Found {len(messages)} unread email(s)")
             
             emails = []
             for msg in messages:
                 msg_id = msg['id']
                 
+                # Skip already processed emails
                 if msg_id in self.processed_ids:
                     continue
                 
-                message = self.service.users().messages().get(
-                    userId='me',
-                    id=msg_id,
-                    format='full'
-                ).execute()
-                
-                headers = message['payload']['headers']
-                subject = next((h['value'] for h in headers if h['name'] == 'Subject'), 'No Subject')
-                sender = next((h['value'] for h in headers if h['name'] == 'From'), 'Unknown')
-                
-                # Get email body
-                body = self._get_message_body(message)
-                
-                # Get thread ID
-                thread_id = message.get('threadId', msg_id)
-                
-                # Parse date
-                date_str = next((h['value'] for h in headers if h['name'] == 'Date'), None)
-                received_at = datetime.now()  # Simplified, could parse date_str
-                
-                email = Email(
-                    id=msg_id,
-                    sender=sender,
-                    subject=subject,
-                    body=body,
-                    received_at=received_at,
-                    thread_id=thread_id
-                )
-                
-                emails.append(email)
+                try:
+                    # Fetch full message
+                    message = self.service.users().messages().get(
+                        userId='me',
+                        id=msg_id,
+                        format='full'
+                    ).execute()
+                    
+                    # Extract headers
+                    headers = message['payload']['headers']
+                    subject = self._get_header(headers, 'Subject') or 'No Subject'
+                    sender_raw = self._get_header(headers, 'From') or 'Unknown'
+                    sender = self._extract_email(sender_raw)
+                    
+                    # Get email body (handles both plain text and HTML)
+                    body = self._get_message_body(message)
+                    
+                    # Get thread ID
+                    thread_id = message.get('threadId', msg_id)
+                    
+                    # Parse date
+                    date_str = self._get_header(headers, 'Date')
+                    received_at = self._parse_date(date_str) if date_str else datetime.now()
+                    
+                    email = Email(
+                        id=msg_id,
+                        sender=sender,
+                        subject=subject,
+                        body=body,
+                        received_at=received_at,
+                        thread_id=thread_id
+                    )
+                    
+                    emails.append(email)
+                    self.processed_ids.add(msg_id)
+                    
+                except Exception as e:
+                    print(f"Error processing email {msg_id}: {e}")
+                    continue
             
             return emails
             
         except HttpError as error:
-            print(f'Error checking emails: {error}')
+            print(f'Gmail API error: {error}')
+            return []
+        except Exception as e:
+            print(f'Unexpected error checking emails: {e}')
             return []
     
+    def _get_header(self, headers: List[Dict], name: str) -> Optional[str]:
+        """Extract header value by name."""
+        for header in headers:
+            if header['name'].lower() == name.lower():
+                return header['value']
+        return None
+    
+    def _extract_email(self, sender_string: str) -> str:
+        """
+        Extract email address from sender string.
+        
+        Examples:
+            'John Doe <john@example.com>' -> 'john@example.com'
+            'john@example.com' -> 'john@example.com'
+        """
+        email_match = re.search(r'<(.+?)>', sender_string)
+        if email_match:
+            return email_match.group(1)
+        
+        # If no angle brackets, check if it's a valid email
+        email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', sender_string)
+        if email_match:
+            return email_match.group(0)
+        
+        return sender_string
+    
+    def _parse_date(self, date_str: str) -> datetime:
+        """Parse email date string to datetime."""
+        try:
+            from email.utils import parsedate_to_datetime
+            return parsedate_to_datetime(date_str)
+        except:
+            return datetime.now()
+    
+    def _strip_html(self, html_content: str) -> str:
+        """Strip HTML tags and return plain text."""
+        stripper = HTMLStripper()
+        try:
+            stripper.feed(html_content)
+            text = stripper.get_data()
+            # Clean up extra whitespace
+            text = re.sub(r'\n\s*\n', '\n\n', text)
+            text = re.sub(r' +', ' ', text)
+            return text.strip()
+        except:
+            return html_content
+    
     def _get_message_body(self, message):
-        """Extract body from Gmail message."""
-        if 'parts' in message['payload']:
-            parts = message['payload']['parts']
-            for part in parts:
-                if part['mimeType'] == 'text/plain':
-                    data = part['body'].get('data', '')
-                    if data:
-                        return base64.urlsafe_b64decode(data).decode('utf-8')
-        else:
-            data = message['payload']['body'].get('data', '')
-            if data:
+        """
+        Extract body from Gmail message, handling multipart and HTML content.
+        
+        Priority:
+        1. Plain text (text/plain)
+        2. HTML converted to plain text (text/html)
+        3. Fallback message
+        """
+        def decode_part(data: str) -> str:
+            """Decode base64 encoded part."""
+            try:
                 return base64.urlsafe_b64decode(data).decode('utf-8')
+            except:
+                return ""
+        
+        def extract_from_parts(parts):
+            """Recursively extract body from message parts."""
+            plain_text = None
+            html_text = None
+            
+            for part in parts:
+                mime_type = part.get('mimeType', '')
+                
+                # Handle nested parts (multipart/alternative, etc.)
+                if 'parts' in part:
+                    nested_plain, nested_html = extract_from_parts(part['parts'])
+                    if nested_plain:
+                        plain_text = nested_plain
+                    if nested_html:
+                        html_text = nested_html
+                
+                # Extract plain text
+                elif mime_type == 'text/plain':
+                    data = part.get('body', {}).get('data', '')
+                    if data:
+                        plain_text = decode_part(data)
+                
+                # Extract HTML
+                elif mime_type == 'text/html':
+                    data = part.get('body', {}).get('data', '')
+                    if data:
+                        html_text = decode_part(data)
+            
+            return plain_text, html_text
+        
+        # Check if message has parts (multipart)
+        if 'parts' in message['payload']:
+            plain_text, html_text = extract_from_parts(message['payload']['parts'])
+            
+            # Prefer plain text over HTML
+            if plain_text:
+                return plain_text
+            elif html_text:
+                return self._strip_html(html_text)
+        
+        # Single part message
+        else:
+            mime_type = message['payload'].get('mimeType', '')
+            data = message['payload'].get('body', {}).get('data', '')
+            
+            if data:
+                decoded = decode_part(data)
+                if decoded:
+                    if mime_type == 'text/html':
+                        return self._strip_html(decoded)
+                    return decoded
         
         return "No body content"
     
-    def mark_as_read(self, email_id: str):
+    def mark_as_read(self, email_id: str) -> bool:
         """
         Mark email as read in Gmail.
         
         Args:
             email_id: ID of email to mark as read
+        
+        Returns:
+            True if successful, False otherwise
         """
         try:
             self.service.users().messages().modify(
@@ -312,8 +458,141 @@ Special limited time offer!!!!
             ).execute()
             self.processed_ids.add(email_id)
             print(f"Marked email {email_id} as read")
+            return True
         except HttpError as error:
             print(f'Error marking email as read: {error}')
+            return False
+    
+    def add_label(self, email_id: str, label_name: str) -> bool:
+        """
+        Add a label to an email.
+        
+        Args:
+            email_id: ID of email
+            label_name: Name of label to add
+        
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            # Get or create label
+            labels = self.service.users().labels().list(userId='me').execute()
+            label_id = None
+            
+            for label in labels.get('labels', []):
+                if label['name'] == label_name:
+                    label_id = label['id']
+                    break
+            
+            # Create label if it doesn't exist
+            if not label_id:
+                label_object = {
+                    'name': label_name,
+                    'labelListVisibility': 'labelShow',
+                    'messageListVisibility': 'show'
+                }
+                created_label = self.service.users().labels().create(
+                    userId='me',
+                    body=label_object
+                ).execute()
+                label_id = created_label['id']
+            
+            # Add label to email
+            self.service.users().messages().modify(
+                userId='me',
+                id=email_id,
+                body={'addLabelIds': [label_id]}
+            ).execute()
+            
+            print(f"Added label '{label_name}' to email {email_id}")
+            return True
+            
+        except HttpError as error:
+            print(f'Error adding label: {error}')
+            return False
+    
+    def check_new_support_emails(self, max_results: int = 10) -> List[Email]:
+        """
+        Check for new support-related emails.
+        Filters out spam, promotions, and social emails.
+        
+        Args:
+            max_results: Maximum number of emails to fetch
+        
+        Returns:
+            List of support emails
+        """
+        try:
+            # Query that filters out common non-support categories
+            query = 'is:unread in:inbox -category:promotions -category:social -category:forums -from:noreply'
+            
+            results = self.service.users().messages().list(
+                userId='me',
+                q=query,
+                maxResults=max_results
+            ).execute()
+            
+            messages = results.get('messages', [])
+            
+            if not messages:
+                print("No new support emails found.")
+                return []
+            
+            print(f"Found {len(messages)} potential support email(s)")
+            
+            emails = []
+            for msg in messages:
+                msg_id = msg['id']
+                
+                if msg_id in self.processed_ids:
+                    continue
+                
+                try:
+                    message = self.service.users().messages().get(
+                        userId='me',
+                        id=msg_id,
+                        format='full'
+                    ).execute()
+                    
+                    headers = message['payload']['headers']
+                    subject = self._get_header(headers, 'Subject') or 'No Subject'
+                    sender_raw = self._get_header(headers, 'From') or 'Unknown'
+                    sender = self._extract_email(sender_raw)
+                    
+                    # Skip obvious automated emails
+                    if any(term in sender.lower() for term in ['noreply', 'no-reply', 'donotreply', 'automated']):
+                        print(f"Skipping automated email from {sender}")
+                        continue
+                    
+                    body = self._get_message_body(message)
+                    thread_id = message.get('threadId', msg_id)
+                    date_str = self._get_header(headers, 'Date')
+                    received_at = self._parse_date(date_str) if date_str else datetime.now()
+                    
+                    email = Email(
+                        id=msg_id,
+                        sender=sender,
+                        subject=subject,
+                        body=body,
+                        received_at=received_at,
+                        thread_id=thread_id
+                    )
+                    
+                    emails.append(email)
+                    self.processed_ids.add(msg_id)
+                    
+                except Exception as e:
+                    print(f"Error processing email {msg_id}: {e}")
+                    continue
+            
+            return emails
+            
+        except HttpError as error:
+            print(f'Gmail API error: {error}')
+            return []
+        except Exception as e:
+            print(f'Unexpected error: {e}')
+            return []
     
     def send_reply(self, email: Email, reply_body: str, subject: str = None):
         """
@@ -437,97 +716,53 @@ class MockEmailHandler:
         print("="*60 + "\n")
     
     def _create_mock_emails(self) -> List[Email]:
-        """Create mock emails for testing."""
+        """Load mock emails from JSON files."""
+        import json
+        from pathlib import Path
+        from datetime import datetime
+        
+        test_emails_dir = Path(__file__).parent.parent / "data" / "test_emails"
+        
+        if not test_emails_dir.exists():
+            print(f"Warning: Test emails directory not found at {test_emails_dir}")
+            return self._get_fallback_emails()
+        
+        emails = []
+        json_files = sorted(test_emails_dir.glob("*.json"))
+        
+        if not json_files:
+            print(f"Warning: No JSON files found in {test_emails_dir}")
+            return self._get_fallback_emails()
+        
+        for json_file in json_files:
+            try:
+                with open(json_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                
+                email = Email(
+                    id=data.get("id", f"email_{len(emails)+1:03d}"),
+                    sender=data["sender"],
+                    subject=data["subject"],
+                    body=data["body"],
+                    received_at=datetime.now()
+                )
+                emails.append(email)
+            except Exception as e:
+                print(f"Warning: Failed to load {json_file.name}: {e}")
+                continue
+        
+        return emails if emails else self._get_fallback_emails()
+    
+    def _get_fallback_emails(self) -> List[Email]:
+        """Fallback emails if JSON files can't be loaded."""
+        from datetime import datetime
         return [
             Email(
                 id="email_001",
                 sender="john.doe@example.com",
                 subject="Can't login to my account",
-                body="""Hi TaskFlow Support,
-
-I've been trying to login to my account for the past hour but I keep getting an "Invalid password" error. I'm sure I'm using the correct password. I've tried resetting it twice but I'm not receiving the password reset emails.
-
-This is urgent as I have a project deadline today and need to access my tasks.
-
-Please help!
-
-Thanks,
-John""",
-                received_time="2024-01-15 09:30:00"
-            ),
-            Email(
-                id="email_002",
-                sender="sarah.smith@company.com",
-                subject="Question about team collaboration features",
-                body="""Hello,
-
-I'm considering TaskFlow Pro for my team of 15 people. I have a few questions:
-
-1. Does TaskFlow support real-time collaboration on tasks?
-2. Can we set different permission levels for team members?
-3. Is there a limit on the number of projects we can create?
-4. What's included in the team plan pricing?
-
-Looking forward to your response.
-
-Best regards,
-Sarah Smith
-Project Manager""",
-                received_time="2024-01-15 10:15:00"
-            ),
-            Email(
-                id="email_003",
-                sender="mike.johnson@startup.io",
-                subject="Charged twice this month",
-                body="""Hi Support Team,
-
-I noticed I was charged twice for my Pro subscription this month. I can see two charges of $29.99 on January 3rd and January 5th.
-
-My subscription should only be billed once per month. Can you please investigate this and issue a refund for the duplicate charge?
-
-Transaction IDs:
-- TXN_001234567
-- TXN_001234890
-
-Thanks,
-Mike Johnson
-mike.johnson@startup.io""",
-                received_time="2024-01-15 11:00:00"
-            ),
-            Email(
-                id="email_004",
-                sender="lisa.chen@tech.com",
-                subject="Feature request: Dark mode",
-                body="""Hey TaskFlow team,
-
-Love your product! I've been using it daily for the past 3 months.
-
-Would it be possible to add a dark mode option? I work late hours and the bright interface can be a bit harsh on the eyes.
-
-I know many other users would appreciate this feature too. I saw several requests for it in your community forum.
-
-Keep up the great work!
-
-Lisa""",
-                received_time="2024-01-15 11:30:00"
-            ),
-            Email(
-                id="email_005",
-                sender="david.brown@enterprise.com",
-                subject="Great experience with TaskFlow!",
-                body="""Hi,
-
-I just wanted to share some positive feedback. We've been using TaskFlow Pro for our entire department (50+ users) for the past 6 months, and it's been fantastic.
-
-The interface is intuitive, the mobile app works great, and the customer support has been excellent. We've had a few questions along the way and your team has always been quick to respond.
-
-We're recommending TaskFlow to other departments in our company.
-
-Thank you!
-
-David Brown
-IT Manager""",
-                received_time="2024-01-15 12:00:00"
+                body="Hi TaskFlow Support,\n\nI'm having trouble logging into my account. Can you help?\n\nThanks,\nJohn",
+                received_at=datetime(2024, 1, 15, 9, 30, 0)
             )
         ]
     

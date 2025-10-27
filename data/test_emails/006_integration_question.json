@@ -1,0 +1,7 @@
+{
+  "id": "email_006",
+  "sender": "alex.rivera@devops.io",
+  "subject": "API integration with Slack",
+  "body": "Hello TaskFlow Support,\n\nOur team is interested in integrating TaskFlow with our Slack workspace. I've looked through the documentation but have some specific questions:\n\n1. Can we trigger task creation from Slack messages?\n2. Do task notifications appear in Slack channels?\n3. Is there a webhook API for custom integrations?\n4. What's the rate limit for API calls?\n\nWe have about 100 users and expect moderate API usage.\n\nThanks for your help!\n\nAlex Rivera\nDevOps Lead"
+}
+

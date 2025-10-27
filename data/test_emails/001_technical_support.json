@@ -1,0 +1,7 @@
+{
+  "id": "email_001",
+  "sender": "john.doe@example.com",
+  "subject": "Can't login to my account",
+  "body": "Hi TaskFlow Support,\n\nI've been trying to login to my account for the past hour but I keep getting an \"Invalid password\" error. I'm sure I'm using the correct password. I've tried resetting it twice but I'm not receiving the password reset emails.\n\nThis is urgent as I have a project deadline today and need to access my tasks.\n\nPlease help!\n\nThanks,\nJohn"
+}
+

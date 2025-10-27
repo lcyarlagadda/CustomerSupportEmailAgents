@@ -1,0 +1,7 @@
+{
+  "id": "email_003",
+  "sender": "mike.johnson@startup.io",
+  "subject": "Charged twice this month",
+  "body": "Hi Support Team,\n\nI noticed I was charged twice for my Pro subscription this month. I can see two charges of $29.99 on January 3rd and January 5th.\n\nMy subscription should only be billed once per month. Can you please investigate this and issue a refund for the duplicate charge?\n\nTransaction IDs:\n- TXN_001234567\n- TXN_001234890\n\nThanks,\nMike Johnson\nmike.johnson@startup.io"
+}
+

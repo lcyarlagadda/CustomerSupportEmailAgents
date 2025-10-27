@@ -1,0 +1,7 @@
+{
+  "id": "email_009",
+  "sender": "developer@techcorp.com",
+  "subject": "Bug: Tasks disappearing after sync",
+  "body": "TaskFlow Team,\n\nWe're experiencing a critical bug. When users sync tasks across devices, some tasks are disappearing completely.\n\nSteps to reproduce:\n1. Create a task on desktop\n2. Add subtasks and attachments\n3. Sync to mobile app\n4. Make edits on mobile\n5. Sync back to desktop\n6. Some tasks are now missing\n\nThis has happened to 3 users in the past 2 days. We're on version 2.4.1.\n\nIs this a known issue? We need this fixed urgently.\n\nError logs attached (screenshot in previous email).\n\nMark Thompson\nIT Administrator"
+}
+
