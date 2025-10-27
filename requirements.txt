@@ -1,0 +1,33 @@
+# Core LangChain and LangGraph
+langchain==0.3.7
+langchain-community==0.3.5
+langchain-core==0.3.15
+langgraph==0.2.45
+
+# HuggingFace for LLM and Embeddings (free, works on Colab)
+transformers==4.45.0
+torch==2.5.1
+accelerate==1.0.1
+
+# Vector Store and Local Embeddings
+chromadb==0.5.20
+sentence-transformers==3.3.1
+
+# Document Processing
+pypdf==5.1.0
+beautifulsoup4==4.12.3
+python-dotenv==1.0.1
+
+# Pydantic for structured outputs
+pydantic==2.9.2
+
+# Utilities
+tiktoken==0.8.0
+requests==2.32.3
+
+# Gmail API (for production email integration)
+google-auth==2.35.0
+google-auth-oauthlib==1.2.1
+google-auth-httplib2==0.2.0
+google-api-python-client==2.149.0
+
