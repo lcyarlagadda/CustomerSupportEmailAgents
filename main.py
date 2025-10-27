@@ -106,14 +106,18 @@ def print_final_action(state: dict):
     
     status = state['status']
     if status == "completed_skipped":
-        print(f"⊘ SKIPPED - Category: {state['category']}")
+        print(f"SKIPPED - Category: {state['category']}")
         print("  Reason: Unrelated to product support")
     elif status == "error":
-        print(f"⚠ ERROR - {state.get('error_message', 'Unknown error')}")
-    elif state.get('qa_approved'):
-        print("✓ SENT - Email response sent to customer")
+        print(f"ERROR - {state.get('error_message', 'Unknown error')}")
+    elif status == "completed_approved":
+        print("SENT - Email response sent to customer")
+    elif status == "requires_manual_review":
+        print("REQUIRES MANUAL REVIEW")
+        print("  Reason: QA check did not pass")
+        print("  Action: Review and edit response before sending")
     else:
-        print("⟳ REVISION NEEDED - Quality score too low")
+        print(f"PENDING - Status: {status}")
     
     print("=" * 70 + "\n")
 
@@ -148,12 +152,20 @@ def process_and_respond(workflow: SupportWorkflow, email_handler: GmailHandler, 
     if result["status"] == "error":
         return
     
-    if result.get("final_response") and result["qa_approved"]:
+    if result["status"] == "requires_manual_review":
+        # Don't send, mark for manual review
+        if hasattr(email_handler, 'add_label'):
+            email_handler.add_label(email.id, "NEEDS_REVIEW")
+        print("📝 Email marked for manual review (not sent automatically)\n")
+        return
+    
+    if result["status"] == "completed_approved" and result.get("final_response"):
         email_handler.send_reply(
             email=email,
             reply_body=result["final_response"]
         )
         email_handler.mark_as_read(email.id)
+        print("📧 Email sent successfully\n")
 
 
 def run_continuous_monitoring(workflow: SupportWorkflow, email_handler: GmailHandler):

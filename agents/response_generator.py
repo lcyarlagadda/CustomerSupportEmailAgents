@@ -15,116 +15,66 @@ class ResponseGeneratorAgent:
         
         # Prompts for different email categories (string templates)
         self.prompts = {
-            "technical_support": """You are a skilled technical support agent for TaskFlow Pro.
+            "technical_support": """Customer Email - From: {sender}, Subject: {subject}
+Body: {body}
 
-Write a helpful, empathetic response to a customer's technical issue.
+Context: {context}
 
-Guidelines:
-- Show empathy and acknowledge their frustration
-- Provide clear, step-by-step troubleshooting instructions (3-5 steps max)
-- Be CONCISE - aim for 200-400 words
-- Offer 2-3 solutions maximum
-- Include 1-2 relevant help links if needed
-- End with reassurance and invitation for follow-up
+Write ONLY an email response (200-400 words) that:
+- Shows empathy and acknowledges frustration
+- Provides 3-5 clear troubleshooting steps
+- Offers 2-3 solutions
+- Ends with reassurance
 
-Context/Information to use:
-{context}
-
-Original Email:
-From: {sender}
-Subject: {subject}
-
-{body}
-
-Write a complete but CONCISE email response (200-400 words).""",
+Start with "Dear" or "Hi". Output ONLY the email, no explanations.""",
             
-            "product_inquiry": """You are a knowledgeable product specialist for TaskFlow Pro.
+            "product_inquiry": """Customer Email - From: {sender}, Subject: {subject}
+Body: {body}
 
-Answer the customer's product questions clearly and helpfully.
+Context: {context}
 
-Guidelines:
-- Answer questions directly and accurately
-- Be CONCISE - aim for 200-350 words
-- Use bullet points for features/benefits
-- Include 1-2 relevant documentation links
-- Suggest next steps (trial, demo, etc.)
+Write ONLY an email response (200-350 words) that:
+- Answers questions directly and accurately
+- Uses bullet points for features
+- Suggests next steps
 
-Context/Information:
-{context}
-
-Original Email:
-From: {sender}
-Subject: {subject}
-
-{body}
-
-Write a complete but CONCISE email response (200-350 words).""",
+Start with "Dear" or "Hi". Output ONLY the email, no explanations.""",
             
-            "billing": """You are a helpful billing specialist for TaskFlow Pro.
+            "billing": """Customer Email - From: {sender}, Subject: {subject}
+Body: {body}
 
-Address the customer's billing question or concern.
+Context: {context}
 
-Guidelines:
-- Be clear and transparent
-- Show empathy for billing issues
-- Be CONCISE - aim for 150-300 words
-- Provide specific numbers and next steps
-- Offer escalation if needed
+Write ONLY an email response (150-300 words) that:
+- Is clear and transparent
+- Shows empathy
+- Provides specific next steps
 
-Context/Information:
-{context}
-
-Original Email:
-From: {sender}
-Subject: {subject}
-
-{body}
-
-Write a complete but CONCISE email response (150-300 words).""",
+Start with "Dear" or "Hi". Output ONLY the email, no explanations.""",
             
-            "feature_request": """You are an enthusiastic product team member for TaskFlow Pro.
+            "feature_request": """Customer Email - From: {sender}, Subject: {subject}
+Body: {body}
 
-Respond to a customer's feature request or suggestion.
+Context: {context}
 
-Guidelines:
-- Thank them sincerely
-- Be CONCISE - aim for 150-250 words
-- Explain if similar features exist
-- Suggest workarounds if available
-- Encourage continued feedback
+Write ONLY an email response (150-250 words) that:
+- Thanks them sincerely
+- Explains if similar features exist
+- Suggests workarounds if available
 
-Context/Information:
-{context}
-
-Original Email:
-From: {sender}
-Subject: {subject}
-
-{body}
-
-Write a complete but CONCISE email response (150-250 words).""",
+Start with "Dear" or "Hi". Output ONLY the email, no explanations.""",
             
-            "feedback": """You are a responsive customer success agent for TaskFlow Pro.
+            "feedback": """Customer Email - From: {sender}, Subject: {subject}
+Body: {body}
 
-Acknowledge and respond to customer feedback.
+Context: {context}
 
-Guidelines:
-- Thank them for their feedback
-- Be CONCISE - aim for 100-200 words
-- For positive: Show appreciation
-- For negative: Apologize and explain improvements
-- Invite ongoing communication
+Write ONLY an email response (100-200 words) that:
+- Thanks them for feedback
+- Shows appreciation (positive) or apologizes (negative)
+- Invites ongoing communication
 
-Context/Information:
-{context}
-
-Original Email:
-From: {sender}
-Subject: {subject}
-
-{body}
-
-Write a complete but CONCISE email response (100-200 words)."""
+Start with "Dear" or "Hi". Output ONLY the email, no explanations."""
         }
     
     def generate_response(
@@ -169,33 +119,128 @@ Write a complete but CONCISE email response (100-200 words)."""
         )
         
         # Generate response
-        response = self.llm.invoke(formatted_prompt)
+        raw_response = self.llm.invoke(formatted_prompt)
+        
+        # Clean up the response (remove prompt echo)
+        response = self._clean_response(raw_response, email_data)
         
         return response
     
+    def _clean_response(self, raw_response: str, email_data: dict) -> str:
+        """
+        Clean up LLM response by removing prompt echo and extracting actual email.
+        
+        Args:
+            raw_response: Raw LLM output
+            email_data: Original email data
+        
+        Returns:
+            Clean email response
+        """
+        # Common markers that indicate the start of the actual response
+        start_markers = [
+            "Dear ",
+            "Hi ",
+            "Hello ",
+            "Thank you for",
+            "Thanks for",
+            f"Dear {email_data.get('sender', '').split('@')[0]}",
+        ]
+        
+        # Try to find where the actual response starts
+        response = raw_response
+        
+        # Remove everything before the first greeting if prompt is echoed
+        for marker in start_markers:
+            if marker in response:
+                # Find the first occurrence of a greeting
+                idx = response.find(marker)
+                if idx > 100:  # Only trim if there's significant text before
+                    response = response[idx:]
+                break
+        
+        # Remove any trailing meta-commentary (text after signature)
+        signature_markers = [
+            "Best regards,",
+            "Sincerely,",
+            "Best,",
+            "Regards,",
+            "TaskFlow Support Team",
+            "TaskFlow Pro Support"
+        ]
+        
+        # Find the last signature and cut after it
+        last_sig_pos = -1
+        last_sig_len = 0
+        for marker in signature_markers:
+            pos = response.rfind(marker)
+            if pos > last_sig_pos:
+                last_sig_pos = pos
+                last_sig_len = len(marker)
+        
+        if last_sig_pos > 0:
+            # Keep text up to 100 chars after the signature (for closing lines)
+            end_pos = last_sig_pos + last_sig_len + 100
+            potential_end = response[last_sig_pos:end_pos]
+            
+            # Find where the meta-commentary starts
+            meta_markers = [
+                "\n\nThis response",
+                "\n\nThe response",
+                "\n\nNote:",
+                "\n\nI hope",
+                "\n\nPlease note",
+                "Use the relevant information"
+            ]
+            
+            for meta_marker in meta_markers:
+                if meta_marker in potential_end:
+                    meta_pos = potential_end.find(meta_marker)
+                    response = response[:last_sig_pos + meta_pos]
+                    break
+            else:
+                # No meta-commentary found, keep reasonable amount after signature
+                lines_after = response[last_sig_pos + last_sig_len:].split('\n')
+                # Keep at most 3 lines after signature
+                if len(lines_after) > 3:
+                    response = response[:last_sig_pos + last_sig_len] + '\n'.join(lines_after[:3])
+        
+        # Remove any remaining prompt artifacts
+        prompt_artifacts = [
+            "You are a skilled technical support agent",
+            "Your task is to write",
+            "Guidelines:",
+            "Context/Information to use:",
+            "Original Email:",
+            "Write a complete but CONCISE",
+            "Use the relevant information from"
+        ]
+        
+        for artifact in prompt_artifacts:
+            if artifact in response[:200]:  # Only check beginning
+                # This is likely still the prompt, try harder to find actual response
+                lines = response.split('\n')
+                for i, line in enumerate(lines):
+                    if any(marker in line for marker in start_markers):
+                        response = '\n'.join(lines[i:])
+                        break
+        
+        return response.strip()
+    
     def _get_general_prompt(self) -> str:
         """Get a general-purpose response prompt."""
-        return """You are a helpful support agent for TaskFlow Pro.
+        return """Customer Email - From: {sender}, Subject: {subject}
+Body: {body}
 
-Your task is to write a professional, helpful response to the customer's email.
+Context: {context}
 
-Guidelines:
-- Be professional, friendly, and helpful
-- Address their concerns directly
-- Provide relevant information or next steps
-- Show empathy and understanding
-- End with an invitation for follow-up questions
+Write ONLY an email response (200-400 words) that:
+- Is professional and helpful
+- Addresses their concerns directly
+- Provides next steps
+- Shows empathy
 
-Context/Information:
-{context}
-
-Original Email:
-From: {sender}
-Subject: {subject}
-
-{body}
-
-Please write a complete email response."""
+Start with "Dear" or "Hi". Output ONLY the email, no explanations."""
     
     def add_signature(self, email_body: str, agent_name: str = "TaskFlow Support Team") -> str:
         """

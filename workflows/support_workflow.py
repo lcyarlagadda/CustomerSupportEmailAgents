@@ -47,12 +47,12 @@ class SupportState(TypedDict):
 class SupportWorkflow:
     """Multi-agent workflow for automated customer support."""
     
-    def __init__(self, max_revisions: int = 2):
+    def __init__(self, max_revisions: int = 0):
         """
         Initialize the support workflow.
         
         Args:
-            max_revisions: Maximum number of times to revise a response
+            max_revisions: Maximum number of times to revise a response (default: 0 = no retries)
         """
         self.max_revisions = max_revisions
         
@@ -268,11 +268,12 @@ class SupportWorkflow:
         elif state.get("qa_approved", False):
             state["final_response"] = state["draft_response"]
             state["status"] = "completed_approved"
-            print("\nResponse approved and ready to send")
+            print("\n✓ Response approved and ready to send")
         else:
             state["final_response"] = state["draft_response"]
-            state["status"] = "completed_not_approved"
-            print("\nResponse generated but not approved. Manual review recommended.")
+            state["status"] = "requires_manual_review"
+            print("\n⚠ Response generated but requires manual review before sending")
+            print(f"   Issues: {', '.join(state.get('qa_issues', ['Quality threshold not met']))}")
         
         return state
     
@@ -292,13 +293,18 @@ class SupportWorkflow:
         
         # Check if we can revise
         revision_count = state.get("revision_count", 0)
-        max_revisions = state.get("max_revisions", 2)
+        max_revisions = state.get("max_revisions", 0)
         
         if revision_count < max_revisions:
             state["revision_count"] = revision_count + 1
+            print(f"QA failed - Retrying (attempt {state['revision_count'] + 1}/{max_revisions + 1})...")
             return "revise"
         else:
-            print(f"Max revisions ({max_revisions}) reached")
+            # Skip retry, mark for manual review
+            if max_revisions == 0:
+                print("QA check failed - Marking for manual review (no retries enabled)")
+            else:
+                print(f"QA check failed after {max_revisions} revision(s) - Marking for manual review")
             return "reject"
     
     # Main execution

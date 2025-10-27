@@ -36,65 +36,26 @@ class QAAgent:
     
     def __init__(self):
         """Initialize the QA agent."""
-        pipe = load_llm_pipeline(temperature=0.3)
+        pipe = load_llm_pipeline(temperature=0.5)  # Slightly higher for varied evaluations
         self.llm = HuggingFacePipeline(pipeline=pipe)
         
         self.parser = PydanticOutputParser(pydantic_object=QAResult)
         
-        # Create QA prompt with examples
-        self.prompt = """You are a quality assurance specialist for customer support emails at TaskFlow Pro.
+        # Create QA prompt - simple and direct
+        self.prompt = """Evaluate this support email response. Score 0-10 where 8-10=approve, 0-7=reject.
 
-Review the email response and score it on quality (0-10).
+Check: Does it answer the question? Is tone professional? Are steps clear?
 
-QUALITY CRITERIA:
-1. Accuracy: Information is correct
-2. Completeness: Addresses the customer's question
-3. Tone: Professional and empathetic
-4. Clarity: Easy to understand
-5. Actionability: Provides clear next steps
-
-SCORING:
-- 8-10: Excellent, approve immediately
-- 7: Good, approve
-- 4-6: Needs improvement, reject
-- 0-3: Poor, reject
-
-EXAMPLE OF A POOR RESPONSE:
-Response: "We received your message."
-Evaluation: {{"approved": false, "quality_score": 2.5, "issues": ["Too brief"], "suggestions": ["Add details"], "tone_assessment": "Generic", "reasoning": "No help provided"}}
-
-EXAMPLE OF A GOOD RESPONSE:
-Response: "Thank you for reaching out. Here are 3 steps to fix your issue: 1) Clear cache, 2) Restart app, 3) Contact us if needed. Best regards, Support Team"
-Evaluation: {{"approved": true, "quality_score": 8.5, "issues": [], "suggestions": [], "tone_assessment": "Professional and helpful", "reasoning": "Clear steps provided"}}
-
-NOW REVIEW THIS EMAIL:
-
-Original Email:
-From: {sender}
-Subject: {subject}
-Category: {category}
-Priority: {priority}
-
+CUSTOMER'S EMAIL:
 {customer_body}
 
----
-
-Generated Response:
+OUR RESPONSE:
 {response}
 
----
+Output ONLY this JSON (fill with your evaluation):
+{{"approved": true/false, "quality_score": X.X, "issues": ["issue1", "issue2"], "suggestions": ["fix1", "fix2"], "tone_assessment": "describe tone", "reasoning": "why approve/reject"}}
 
-Return ONLY a JSON object with these exact fields:
-{{
-  "approved": true or false,
-  "quality_score": 0.0 to 10.0,
-  "issues": ["list", "of", "issues"] or [],
-  "suggestions": ["list", "of", "suggestions"] or [],
-  "tone_assessment": "description of tone",
-  "reasoning": "brief explanation"
-}}
-
-DO NOT return the JSON schema. Return actual evaluation values."""
+Evaluate THIS specific response above. Do not use examples."""
     
     def review(
         self,
@@ -118,18 +79,20 @@ DO NOT return the JSON schema. Return actual evaluation values."""
         Returns:
             QAResult object with evaluation
         """
-        # Format the prompt (removed format_instructions to avoid schema confusion)
+        # Format the prompt with actual email content
+        customer_body = original_email.get("body", "")[:500]  # Show more context now
+        response_text = generated_response[:800]  # Show more of the response
+        
         formatted_prompt = self.prompt.format(
-            sender=original_email.get("sender", "Unknown"),
-            subject=original_email.get("subject", "No subject"),
-            category=category,
-            priority=priority,
-            customer_body=original_email.get("body", "")[:300],  # Truncate for focus
-            response=generated_response[:500]  # Truncate long responses for faster review
+            customer_body=customer_body,
+            response=response_text
         )
         
         # Get LLM response
         llm_response = self.llm.invoke(formatted_prompt)
+        
+        # Debug: Show first 200 chars of response
+        # print(f"[QA Debug] LLM response preview: {llm_response[:200]}...")
         
         # Parse the response
         try:
@@ -182,42 +145,102 @@ DO NOT return the JSON schema. Return actual evaluation values."""
         """
         issues = []
         suggestions = []
-        score = 7.0  # Start with passing score
+        score = 8.0  # Start with good score
+        tone_parts = []
         
-        # Length check
-        if len(response) < 100:
-            issues.append("Response is too short")
-            suggestions.append("Provide more detailed assistance")
-            score -= 2.0
+        response_lower = response.lower()
         
-        # Check for professional closing
-        if not any(word in response.lower() for word in ["regards", "sincerely", "best"]):
+        # Length checks - more nuanced
+        if len(response) < 80:
+            issues.append("Response too brief - needs more detail")
+            suggestions.append("Expand with specific steps or information")
+            score -= 3.0
+            tone_parts.append("too brief")
+        elif len(response) < 150:
+            issues.append("Response somewhat short")
+            suggestions.append("Add more context or details")
+            score -= 1.0
+        elif len(response) > 3000:
+            issues.append("Response very long")
+            suggestions.append("Condense to key points")
+            score -= 1.5
+            tone_parts.append("overly verbose")
+        
+        # Greeting check
+        has_greeting = any(response.startswith(word) or f"\n{word}" in response[:100] for word in ["Dear", "Hi", "Hello", "Hey"])
+        if not has_greeting:
+            issues.append("Missing greeting")
+            suggestions.append("Start with 'Dear [Name]' or 'Hi'")
+            score -= 0.8
+            tone_parts.append("abrupt start")
+        
+        # Empathy check - be more specific
+        empathy_words = ["understand", "appreciate", "frustrat", "apologize", "sorry", "thank you for"]
+        has_empathy = any(word in response_lower for word in empathy_words)
+        if not has_empathy and len(response) > 100:
+            issues.append("Could show more empathy")
+            suggestions.append("Acknowledge customer's concern/frustration")
+            score -= 0.7
+            tone_parts.append("lacks empathy")
+        
+        # Professional closing
+        closing_words = ["regards", "sincerely", "best", "thank you,", "thanks,"]
+        has_closing = any(word in response_lower for word in closing_words)
+        if not has_closing:
             issues.append("Missing professional closing")
-            suggestions.append("Add professional sign-off")
-            score -= 1.0
+            suggestions.append("End with 'Best regards' or similar")
+            score -= 0.8
+            tone_parts.append("incomplete")
         
-        # Check for empathy/greeting
-        if not any(word in response.lower() for word in ["thank", "understand", "appreciate", "dear", "hi", "hello"]):
-            issues.append("Lacks empathy or greeting")
-            suggestions.append("Add empathetic greeting")
-            score -= 1.0
+        # Actionable content - more specific
+        has_steps = bool(re.search(r'\d+[.):]', response))  # Numbered steps
+        has_bullets = '•' in response or '*' in response
+        has_actions = any(word in response_lower for word in ["please", "you can", "try", "click", "go to", "visit"])
         
-        # Check for actionable content
-        if not any(word in response for word in [":", "1.", "2.", "step", "please", "can", "will"]):
-            issues.append("May lack actionable steps")
-            suggestions.append("Provide clear action items")
+        if not (has_steps or has_bullets or has_actions):
+            issues.append("Lacks clear action items")
+            suggestions.append("Provide specific steps or next actions")
+            score -= 1.0
+            tone_parts.append("vague")
+        
+        # Check for common issues
+        if response.count("regards") > 2:
+            issues.append("Multiple sign-offs detected")
             score -= 0.5
+        
+        if "guidelines:" in response_lower or "context:" in response_lower:
+            issues.append("Contains prompt artifacts")
+            suggestions.append("Remove system instructions from response")
+            score -= 2.0
+            tone_parts.append("contains instructions")
+        
+        # Build tone assessment
+        if not tone_parts:
+            if score >= 8.0:
+                tone_assessment = "Professional, empathetic, and helpful"
+            elif score >= 7.0:
+                tone_assessment = "Acceptable professional tone"
+            else:
+                tone_assessment = "Professional but could be improved"
+        else:
+            tone_assessment = f"Issues detected: {', '.join(tone_parts)}"
+        
+        # Build reasoning
+        if not issues:
+            reasoning = "Response meets basic quality standards"
+        else:
+            reasoning = f"Found {len(issues)} issue(s): {'; '.join(issues[:2])}"
         
         # Ensure score is in valid range
         score = max(0.0, min(10.0, score))
         
         return QAResult(
             approved=score >= 7.0,
-            quality_score=score,
+            quality_score=round(score, 1),
             issues=issues if issues else [],
             suggestions=suggestions if suggestions else [],
-            tone_assessment="Automated heuristic evaluation (LLM parse failed)",
-            reasoning=f"Fallback evaluation based on basic checks. Score: {score:.1f}/10"
+            tone_assessment=tone_assessment,
+            reasoning=reasoning
         )
     
     def needs_revision(self, qa_result: QAResult) -> bool:
