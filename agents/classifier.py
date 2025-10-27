@@ -32,39 +32,71 @@ class EmailClassifierAgent:
     
     def __init__(self):
         """Initialize the classifier agent."""
-        pipe = load_llm_pipeline(temperature=0.7)
+        pipe = load_llm_pipeline(temperature=0.3)  # Lower temperature for more consistent classification
         self.llm = HuggingFacePipeline(pipeline=pipe)
         
         self.parser = PydanticOutputParser(pydantic_object=EmailClassification)
         
-        # Create prompt template
+        # Create prompt template with examples
         self.prompt_template = """You are an expert email classification agent for TaskFlow Pro, a project management SaaS platform.
 
-Your task is to analyze incoming support emails and classify them into the appropriate category.
-
-Available categories:
+Classify the email into ONE of these categories:
 {categories}
 
-Important guidelines:
-- Choose the MOST SPECIFIC category that matches the email's primary intent
-- If an email contains multiple topics, classify based on the MAIN issue
-- Mark emails as "unrelated" if they are spam, marketing, or completely off-topic
-- Set priority based on urgency and business impact:
-  * HIGH: Account access issues, billing problems, critical bugs affecting work
-  * MEDIUM: Feature questions, minor bugs, integration issues
-  * LOW: Feature requests, general feedback, how-to questions
+CLASSIFICATION RULES:
+1. technical_support: Login issues, bugs, errors, password resets, sync problems, data issues
+2. product_inquiry: Questions about features, pricing, plans, how things work
+3. billing: Payment issues, subscription problems, refunds, invoices
+4. feature_request: Suggestions for new features or improvements
+5. feedback: Praise, complaints, general comments about the product
+6. unrelated: Spam, marketing, completely off-topic
 
-{format_instructions}
+PRIORITY RULES:
+- HIGH: Can't access account, payment failed, critical bug, data loss, urgent deadline
+- MEDIUM: Non-critical questions, minor bugs, integration issues
+- LOW: Feature requests, general feedback, suggestions
 
-Please classify this email:
+EXAMPLES:
+
+Email: "I can't login to my account"
+{{
+  "category": "technical_support",
+  "priority": "high",
+  "confidence": 0.95,
+  "reasoning": "User cannot access their account - this is a critical technical issue"
+}}
+
+Email: "How much does the team plan cost?"
+{{
+  "category": "product_inquiry",
+  "priority": "medium",
+  "confidence": 0.90,
+  "reasoning": "Customer asking about pricing information"
+}}
+
+Email: "I was charged twice this month"
+{{
+  "category": "billing",
+  "priority": "high",
+  "confidence": 0.95,
+  "reasoning": "Duplicate charge is a billing issue requiring immediate attention"
+}}
+
+NOW CLASSIFY THIS EMAIL:
 
 From: {sender}
 Subject: {subject}
+Body: {body}
 
-Body:
-{body}
+Return ONLY a JSON object with these exact fields:
+{{
+  "category": "one of the categories above",
+  "priority": "high, medium, or low",
+  "confidence": 0.0 to 1.0,
+  "reasoning": "brief explanation"
+}}
 
-Respond ONLY with valid JSON matching the schema above."""
+DO NOT return the JSON schema. Return actual values."""
     
     def classify(self, email_data: Dict[str, Any]) -> EmailClassification:
         """
@@ -86,10 +118,9 @@ Respond ONLY with valid JSON matching the schema above."""
         
         prompt = self.prompt_template.format(
             categories=categories_text,
-            format_instructions=self.parser.get_format_instructions(),
             sender=email_data.get("sender", "Unknown"),
             subject=email_data.get("subject", "No subject"),
-            body=email_data.get("body", "")
+            body=email_data.get("body", "")[:500]  # Limit body length for better focus
         )
         
         # Generate response
@@ -102,29 +133,93 @@ Respond ONLY with valid JSON matching the schema above."""
             if json_match:
                 json_str = json_match.group()
                 result_dict = json.loads(json_str)
+                
+                # Check if this is actual data or schema
+                if 'title' in result_dict and 'description' in result_dict:
+                    # LLM returned schema instead of data
+                    print("Warning: LLM returned JSON schema instead of classification")
+                    print(f"Full response: {response[:300]}...")
+                    # Fall back to keyword-based classification
+                    return self._fallback_classification(email_data)
+                
                 return EmailClassification(**result_dict)
             else:
                 # Try to parse the entire response
                 result_dict = json.loads(response)
+                
+                # Check for schema
+                if 'title' in result_dict:
+                    return self._fallback_classification(email_data)
+                
                 return EmailClassification(**result_dict)
+                
         except json.JSONDecodeError as e:
             print(f"Error parsing classification JSON: {e}")
             print(f"Response preview: {response[:200]}...")
-            # Return default classification
-            return EmailClassification(
-                category="product_inquiry",
-                confidence=0.5,
-                reasoning="Failed to parse LLM response",
-                priority="medium"
-            )
+            return self._fallback_classification(email_data)
+            
         except Exception as e:
             print(f"Error creating classification: {e}")
+            print(f"Response type: {type(response)}")
+            return self._fallback_classification(email_data)
+    
+    def _fallback_classification(self, email_data: Dict[str, Any]) -> EmailClassification:
+        """
+        Fallback classification using keyword matching when LLM fails.
+        
+        Args:
+            email_data: Email data dictionary
+        
+        Returns:
+            EmailClassification based on keywords
+        """
+        subject = email_data.get("subject", "").lower()
+        body = email_data.get("body", "").lower()
+        text = subject + " " + body
+        
+        # Technical support keywords
+        if any(word in text for word in ["login", "password", "access", "error", "bug", "crash", "not working", "broken", "reset", "can't", "cannot"]):
             return EmailClassification(
-                category="product_inquiry",
-                confidence=0.5,
-                reasoning="Failed to parse LLM response",
-                priority="medium"
+                category="technical_support",
+                priority="high" if any(word in text for word in ["urgent", "asap", "critical", "can't access"]) else "medium",
+                confidence=0.7,
+                reasoning="Keyword-based classification: Technical issue detected"
             )
+        
+        # Billing keywords
+        if any(word in text for word in ["billing", "charge", "payment", "invoice", "refund", "subscription", "cancel"]):
+            return EmailClassification(
+                category="billing",
+                priority="high" if any(word in text for word in ["charged twice", "wrong amount", "didn't receive"]) else "medium",
+                confidence=0.75,
+                reasoning="Keyword-based classification: Billing issue detected"
+            )
+        
+        # Feature request keywords
+        if any(word in text for word in ["feature request", "suggestion", "would be nice", "please add", "could you add"]):
+            return EmailClassification(
+                category="feature_request",
+                priority="low",
+                confidence=0.7,
+                reasoning="Keyword-based classification: Feature request detected"
+            )
+        
+        # Feedback keywords
+        if any(word in text for word in ["love", "great", "thank", "feedback", "disappointed", "frustrated"]):
+            return EmailClassification(
+                category="feedback",
+                priority="low",
+                confidence=0.65,
+                reasoning="Keyword-based classification: Feedback detected"
+            )
+        
+        # Default to product inquiry
+        return EmailClassification(
+            category="product_inquiry",
+            priority="medium",
+            confidence=0.6,
+            reasoning="Keyword-based classification: General inquiry (fallback)"
+        )
     
     def should_process(self, classification: EmailClassification) -> bool:
         """
