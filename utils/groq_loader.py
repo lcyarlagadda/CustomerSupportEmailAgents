@@ -58,12 +58,11 @@ def load_groq_llm(model_name: str, temperature: Optional[float] = None, max_toke
     Returns:
         ChatGroq instance
     
-    Available Models (as of 2024):
-        - llama-3.2-90b-vision-preview - Llama 3.2 90B (best quality)
-        - llama-3.2-11b-vision-preview - Llama 3.2 11B (balanced)
-        - llama-3.2-3b-preview - Llama 3.2 3B (fast, recommended)
-        - llama-3.2-1b-preview - Llama 3.2 1B (fastest)
-        - mixtral-8x7b-32768 - Mixtral 8x7B (excellent)
+    Available Models (Current as of Dec 2024):
+        - llama-3.3-70b-versatile - Llama 3.3 70B (best quality)
+        - llama-3.1-70b-versatile - Llama 3.1 70B (excellent)
+        - llama-3.1-8b-instant - Llama 3.1 8B (fast, recommended)
+        - mixtral-8x7b-32768 - Mixtral 8x7B (excellent, 32k context)
         - gemma2-9b-it - Gemma 2 9B (good alternative)
     """
     global _groq_cache
@@ -105,29 +104,29 @@ def load_groq_llm(model_name: str, temperature: Optional[float] = None, max_toke
 def list_recommended_models():
     """Print recommended Groq models."""
     recommendations = {
-        'llama-3.2-3b-preview': {
-            'speed': '⚡⚡⚡ Very Fast',
+        'llama-3.1-8b-instant': {
+            'speed': '⚡⚡⚡⚡ Fastest',
             'quality': 'Excellent',
             'recommended': True,
-            'notes': 'Best balance - recommended for most use cases'
+            'notes': 'Best balance - recommended for most use cases (DEFAULT)'
         },
-        'llama-3.2-1b-preview': {
-            'speed': '⚡⚡⚡⚡ Fastest',
-            'quality': 'Good',
+        'llama-3.3-70b-versatile': {
+            'speed': '⚡⚡ Fast',
+            'quality': 'Best',
             'recommended': True,
-            'notes': 'Fastest option, great for high-volume'
+            'notes': 'Highest quality, latest model'
         },
-        'llama-3.2-11b-vision-preview': {
+        'llama-3.1-70b-versatile': {
             'speed': '⚡⚡ Fast',
             'quality': 'Excellent',
             'recommended': True,
-            'notes': 'Higher quality, still fast'
+            'notes': 'Very high quality, stable'
         },
         'mixtral-8x7b-32768': {
             'speed': '⚡⚡ Fast',
             'quality': 'Excellent',
             'recommended': True,
-            'notes': 'Very capable, 32k context'
+            'notes': 'Great for long emails, 32k context'
         },
         'gemma2-9b-it': {
             'speed': '⚡⚡⚡ Very Fast',
@@ -152,7 +151,7 @@ def list_recommended_models():
     print("1. Get FREE API key: https://console.groq.com/keys")
     print("2. Add to .env: GROQ_API_KEY=your_key_here")
     print("3. Set: LLM_PROVIDER=groq")
-    print("4. Set: GROQ_MODEL=llama-3.2-3b-preview")
+    print("4. Set: GROQ_MODEL=llama-3.1-8b-instant  (default)")
     print("\nProcessing speed: 1-2 seconds per email! ⚡")
     print("=" * 70 + "\n")
 

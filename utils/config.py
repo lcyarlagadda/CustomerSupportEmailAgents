@@ -16,7 +16,7 @@ VECTOR_DB_DIR = PROJECT_ROOT / "vectorstore"
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "huggingface")  # "groq" or "huggingface"
 
 # Groq Configuration (fastest - 1-2s per email, FREE 14.4k requests/day) ⚡
-GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.2-3b-preview")  # llama-3.2-3b-preview, mixtral-8x7b-32768, etc.
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")  # Current: llama-3.1-8b-instant, llama-3.3-70b-versatile, mixtral-8x7b-32768
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")  # Get FREE key at: https://console.groq.com/keys
 
 # HuggingFace Configuration (local - unlimited, FREE forever)

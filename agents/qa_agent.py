@@ -88,7 +88,13 @@ Evaluate THIS specific response above. Do not use examples."""
         )
         
         # Get LLM response
-        llm_response = self.llm.invoke(formatted_prompt)
+        raw_response = self.llm.invoke(formatted_prompt)
+        
+        # Handle different response types (Groq returns AIMessage, HuggingFace returns string)
+        if hasattr(raw_response, 'content'):
+            llm_response = raw_response.content
+        else:
+            llm_response = raw_response
         
         # Debug: Show first 200 chars of response
         # print(f"[QA Debug] LLM response preview: {llm_response[:200]}...")

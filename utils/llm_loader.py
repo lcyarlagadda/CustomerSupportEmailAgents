@@ -58,10 +58,7 @@ def load_llm_pipeline(temperature=None, max_tokens=512):
             tokenizer.pad_token = tokenizer.eos_token
         
         # Configure quantization for GPU (2-3x speedup with minimal quality loss)
-        model_kwargs = {
-            "token": hf_token,
-            "device_map": "auto" if device == "cuda" else None,
-        }
+        model_kwargs = {}
         
         if device == "cuda" and use_quantization:
             # INT8 quantization - faster inference with minimal accuracy loss
@@ -73,6 +70,7 @@ def load_llm_pipeline(temperature=None, max_tokens=512):
             )
             model_kwargs["quantization_config"] = quantization_config
             model_kwargs["torch_dtype"] = torch.float16
+            model_kwargs["device_map"] = "auto"
         else:
             model_kwargs["torch_dtype"] = torch.float16 if device == "cuda" else torch.float32
         
@@ -81,6 +79,7 @@ def load_llm_pipeline(temperature=None, max_tokens=512):
             "text-generation",
             model=LLM_MODEL,
             tokenizer=tokenizer,
+            token=hf_token,  
             device=device if device == "cuda" else -1,  # -1 for CPU
             model_kwargs=model_kwargs,
             max_new_tokens=max_tokens,

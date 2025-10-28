@@ -93,7 +93,13 @@ Please provide a helpful, accurate answer based on the documentation context."""
             question=question
         )
         
-        response = self.llm.invoke(prompt)
+        raw_response = self.llm.invoke(prompt)
+        
+        # Handle different response types (Groq returns AIMessage, HuggingFace returns string)
+        if hasattr(raw_response, 'content'):
+            response = raw_response.content
+        else:
+            response = raw_response
         
         return response
     

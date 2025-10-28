@@ -99,8 +99,16 @@ DO NOT include: [placeholders], notes, explanations, signature, or "please let m
         # Generate response
         raw_response = self.llm.invoke(formatted_prompt)
         
+        # Handle different response types (Groq returns AIMessage, HuggingFace returns string)
+        if hasattr(raw_response, 'content'):
+            # Groq/ChatGPT style AIMessage
+            response_text = raw_response.content
+        else:
+            # HuggingFace style string
+            response_text = raw_response
+        
         # Clean up the response (remove prompt echo)
-        response = self._clean_response(raw_response, email_data)
+        response = self._clean_response(response_text, email_data)
         
         return response
     
