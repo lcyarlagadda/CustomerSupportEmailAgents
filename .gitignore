@@ -44,8 +44,14 @@ credentials.json
 logs/
 *.log
 
+*.md
+
 # Vector Store
 vectorstore/
+
+# Response Cache
+cache/
+*.cache.json
 
 # Gmail API Credentials
 credentials.json
