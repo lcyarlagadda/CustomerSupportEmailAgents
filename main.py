@@ -99,6 +99,49 @@ def print_final_status(state: dict):
     print("=" * 70 + "\n")
 
 
+def detect_escalation(response_text: str) -> bool:
+    """
+    Detect if response contains escalation language.
+
+    Args:
+        response_text: The email response text
+
+    Returns:
+        True if escalation detected, False otherwise
+    """
+    if not response_text:
+        return False
+
+    response_lower = response_text.lower()
+
+    # Escalation keywords
+    escalation_keywords = [
+        "escalat",
+        "escalating",
+        "escalate to",
+        "specialist",
+        "specialist will",
+        "billing team",
+        "technical team",
+        "technical specialist",
+        "product team",
+        "support team",
+        "review by",
+        "forward to",
+        "forwarding to",
+        "manual review",
+        "need to connect you",
+        "reach out to you directly",
+        "will contact you",
+        "will be in touch",
+        "within 24 hours",
+        "dedicated",
+    ]
+
+    # Check if any escalation keyword is present
+    return any(keyword in response_lower for keyword in escalation_keywords)
+
+
 def process_and_respond(workflow: SupportWorkflow, email_handler: GmailHandler, email):
     """Process an email and send response if approved."""
 
@@ -131,9 +174,25 @@ def process_and_respond(workflow: SupportWorkflow, email_handler: GmailHandler, 
         return
 
     if result["status"] == "completed_approved" and result.get("final_response"):
+        final_response = result["final_response"]
+
+        # Check if response contains escalation
+        is_escalation = detect_escalation(final_response)
+
         if not result.get("feedback_saved"):
-            email_handler.send_reply(email=email, reply_body=result["final_response"])
-        email_handler.mark_as_read(email.id)
+            email_handler.send_reply(email=email, reply_body=final_response)
+
+        # If escalation detected, label for review (but still mark as read since sent)
+        if is_escalation:
+            print("\nESCALATION DETECTED - Applying NEEDS_REVIEW label for follow-up tracking")
+            if hasattr(email_handler, "add_label"):
+                email_handler.add_label(email.id, "NEEDS_REVIEW")
+                # Keep unread so it's visible in labeled emails
+                print("Email kept unread for review tracking\n")
+            else:
+                email_handler.mark_as_read(email.id)
+        else:
+            email_handler.mark_as_read(email.id)
 
 
 def run_continuous_monitoring(workflow: SupportWorkflow, email_handler: GmailHandler):

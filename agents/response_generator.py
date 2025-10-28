@@ -294,8 +294,9 @@ Write ONLY the email body (no signature):""",
         lines = response.split("\n")
         cleaned_lines = []
         for line in lines:
-            # Remove all tabs and leading/trailing whitespace
-            cleaned_line = line.replace("\t", "").strip()
+            # Remove ALL leading whitespace (spaces, tabs, non-breaking spaces)
+            # This ensures text is completely left-aligned
+            cleaned_line = line.lstrip(" \t\u00a0").rstrip(" \t")
             if cleaned_line:  # Keep non-empty lines
                 cleaned_lines.append(cleaned_line)
             elif cleaned_lines:  # Preserve single blank lines between paragraphs
@@ -307,6 +308,7 @@ Write ONLY the email body (no signature):""",
         # Normalize multiple blank lines to single blank line
         response = re.sub(r"\n{3,}", "\n\n", response)
 
+        # Final strip to ensure no leading/trailing whitespace on entire response
         return response.strip()
 
     def _get_general_prompt(self) -> str:
@@ -331,11 +333,23 @@ DO NOT include: [placeholders], notes, explanations, signature, or "please let m
         """
         signature_check = ["Thanks,", "TaskFlow Pro Team", "support@taskflowpro.com"]
         if any(sig in email_body for sig in signature_check):
-            # Already has signature, but clean it up
-            return "\n".join(line.replace("\t", "").rstrip() for line in email_body.split("\n"))
+            # Already has signature, but clean it up - remove ALL leading whitespace
+            lines = email_body.split("\n")
+            cleaned_lines = []
+            for line in lines:
+                cleaned_line = line.lstrip(" \t\u00a0").rstrip(" \t")
+                cleaned_lines.append(cleaned_line)
+            return "\n".join(cleaned_lines)
 
-        # Remove any tabs from email body
-        email_body = "\n".join(line.replace("\t", "").rstrip() for line in email_body.split("\n"))
+        # Remove all leading whitespace (spaces, tabs, non-breaking spaces) from each line
+        # This ensures perfect left-alignment
+        lines = email_body.split("\n")
+        cleaned_lines = []
+        for line in lines:
+            # Remove ALL leading whitespace to ensure left alignment
+            cleaned_line = line.lstrip(" \t\u00a0").rstrip(" \t")
+            cleaned_lines.append(cleaned_line)
+        email_body = "\n".join(cleaned_lines)
         email_body = email_body.rstrip()
 
         # Ensure proper spacing before signature

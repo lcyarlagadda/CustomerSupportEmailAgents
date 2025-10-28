@@ -395,17 +395,20 @@ class GmailHandler:
 
             # Create label if it doesn't exist
             if not label_id:
+                print(f"Label '{label_name}' not found. Creating new label...")
                 label_object = {
                     "name": label_name,
-                    "labelListVisibility": "labelShow",
-                    "messageListVisibility": "show",
+                    "labelListVisibility": "labelShow",  # Show in label list
+                    "messageListVisibility": "show",  # Show in message list
                 }
                 created_label = (
                     self.service.users().labels().create(userId="me", body=label_object).execute()
                 )
                 label_id = created_label["id"]
+                print(f"Created label '{label_name}' (ID: {label_id})")
 
             # Add label to email (also keep it unread for visibility)
+            print(f"Applying label to email {email_id}...")
             modified_message = (
                 self.service.users()
                 .messages()
@@ -422,30 +425,48 @@ class GmailHandler:
 
             # Verify label was applied
             applied_labels = modified_message.get("labelIds", [])
+            label_names = []
+            for lbl in labels.get("labels", []):
+                if lbl["id"] in applied_labels:
+                    label_names.append(lbl["name"])
+
             if label_id in applied_labels:
-                print(f"Label '{label_name}' successfully applied to email {email_id}")
+                print(f"{'=' * 70}")
+                print(f"SUCCESS: Label '{label_name}' applied to email {email_id}")
+                print(f"Email now has labels: {', '.join(label_names) if label_names else 'None'}")
+                print(f"{'=' * 70}")
+                print(f"\nTo view labeled emails in Gmail:")
+                print(f"1. In Gmail, search for: label:{label_name} is:unread")
+                print(f"2. Or click the '{label_name}' label in the left sidebar")
+                print(f"3. Check Settings > Labels to ensure label is visible\n")
                 return True
             else:
-                print(
-                    f"Warning: Label '{label_name}' may not have been applied correctly to email {email_id}"
-                )
+                print(f"{'=' * 70}")
+                print(f"WARNING: Label '{label_name}' may not have been applied correctly")
+                print(f"Expected label ID: {label_id}")
+                print(f"Applied label IDs: {applied_labels}")
+                print(f"{'=' * 70}\n")
                 return False
 
         except HttpError as error:
             error_content = (
                 error.content.decode("utf-8") if hasattr(error, "content") else str(error)
             )
+            print(f"\n{'=' * 70}")
             print(f"ERROR: Failed to add label '{label_name}' to email {email_id}")
-            print(f"HTTP Error: {error.resp.status if hasattr(error, 'resp') else 'Unknown'}")
+            print(f"HTTP Status: {error.resp.status if hasattr(error, 'resp') else 'Unknown'}")
             print(f"Error Details: {error_content}")
+            print(f"{'=' * 70}\n")
             return False
         except Exception as e:
             import traceback
 
+            print(f"\n{'=' * 70}")
             print(f"ERROR: Unexpected error adding label '{label_name}' to email {email_id}")
             print(f"Error: {e}")
             print(f"Error Type: {type(e).__name__}")
             print(f"Traceback:\n{traceback.format_exc()}")
+            print(f"{'=' * 70}\n")
             return False
 
     def check_new_support_emails(self, max_results: int = 10) -> List[Email]:
@@ -536,44 +557,145 @@ class GmailHandler:
             print(f"Unexpected error: {e}")
             return []
 
+    def _normalize_message_id(self, message_id: str) -> str:
+        """
+        Normalize Message-ID to ensure proper formatting.
+
+        Args:
+            message_id: Message-ID string (may have whitespace or missing brackets)
+
+        Returns:
+            Normalized Message-ID in angle brackets
+        """
+        if not message_id:
+            return ""
+        # Strip whitespace
+        message_id = message_id.strip()
+        # Remove angle brackets if present (we'll add them)
+        message_id = message_id.strip("<>")
+        # Ensure it's in angle brackets
+        return f"<{message_id}>"
+
+    def _build_references_header(self, original_headers: List[Dict]) -> str:
+        """
+        Build proper References header from original email headers.
+
+        Args:
+            original_headers: List of header dictionaries from original message
+
+        Returns:
+            Properly formatted References header value
+        """
+        # Get existing References
+        references_str = self._get_header(original_headers, "References") or ""
+        # Get In-Reply-To
+        in_reply_to = self._get_header(original_headers, "In-Reply-To") or ""
+        # Get Message-ID
+        message_id = self._get_header(original_headers, "Message-ID") or ""
+
+        # Normalize Message-ID
+        normalized_msg_id = self._normalize_message_id(message_id)
+
+        # Build reference list
+        ref_list = []
+
+        # Add existing References (split by spaces and normalize each)
+        if references_str:
+            # Split references and normalize each
+            existing_refs = re.split(r"\s+", references_str.strip())
+            for ref in existing_refs:
+                if ref:
+                    normalized_ref = self._normalize_message_id(ref)
+                    if normalized_ref and normalized_ref not in ref_list:
+                        ref_list.append(normalized_ref)
+
+        # Add In-Reply-To if not already in References
+        if in_reply_to:
+            normalized_in_reply_to = self._normalize_message_id(in_reply_to)
+            if normalized_in_reply_to and normalized_in_reply_to not in ref_list:
+                ref_list.append(normalized_in_reply_to)
+
+        # Add current Message-ID if not already present
+        if normalized_msg_id and normalized_msg_id not in ref_list:
+            ref_list.append(normalized_msg_id)
+
+        # Return space-separated string
+        return " ".join(ref_list) if ref_list else normalized_msg_id
+
     def send_reply(self, email: Email, reply_body: str, subject: str = None):
         """
-        Send a reply via Gmail API.
+        Send a reply via Gmail API as part of the original thread.
 
         Args:
             email: Original email to reply to
-            reply_body: Body of the reply
+            reply_body: Body of the reply (should be properly formatted)
             subject: Optional subject (defaults to Re: original subject)
         """
         try:
-            reply_subject = subject or f"Re: {email.subject}"
+            # Handle subject line - avoid duplicate "Re:" prefixes
+            if subject:
+                reply_subject = subject
+            elif email.subject.lower().startswith("re:"):
+                reply_subject = email.subject
+            else:
+                reply_subject = f"Re: {email.subject}"
 
             # Extract email address from sender (remove name if present)
             to_email = email.sender
             if "<" in to_email:
                 to_email = to_email.split("<")[1].split(">")[0]
 
-            # Create message
-            message = MIMEText(reply_body)
-            message["to"] = to_email
-            message["subject"] = reply_subject
-            message["In-Reply-To"] = email.id
-            message["References"] = email.id
+            # Get the authenticated user's email address for From header
+            profile = self.service.users().getProfile(userId="me").execute()
+            from_email = profile.get("emailAddress", self.email_address)
+
+            # Get the original message to retrieve Message-ID header for proper threading
+            original_message = (
+                self.service.users()
+                .messages()
+                .get(userId="me", id=email.id, format="full")
+                .execute()
+            )
+            headers = original_message["payload"]["headers"]
+
+            # Extract and normalize Message-ID from original email
+            message_id_raw = self._get_header(headers, "Message-ID")
+            if not message_id_raw:
+                # Fallback: create a Message-ID if not present
+                message_id_raw = f"{email.id}@mail.gmail.com"
+            message_id = self._normalize_message_id(message_id_raw)
+
+            # Build proper References header
+            references = self._build_references_header(headers)
+
+            # Normalize reply body - ensure perfect formatting
+            # Remove all leading whitespace (spaces, tabs) from each line
+            lines = reply_body.split("\n")
+            cleaned_lines = []
+            for line in lines:
+                # Remove ALL leading whitespace (spaces, tabs, non-breaking spaces)
+                cleaned_line = line.lstrip(" \t\u00a0").rstrip(" \t")
+                cleaned_lines.append(cleaned_line)
+
+            # Join and normalize multiple blank lines
+            reply_body = "\n".join(cleaned_lines)
+            # Remove leading/trailing whitespace from entire body
+            reply_body = reply_body.strip()
+            # Normalize paragraph spacing (max 2 consecutive newlines)
+            reply_body = re.sub(r"\n{3,}", "\n\n", reply_body)
+
+            # Create message with proper threading headers
+            message = MIMEText(reply_body, "plain", "utf-8")
+            message["From"] = from_email
+            message["To"] = to_email
+            message["Subject"] = reply_subject
+            message["In-Reply-To"] = message_id
+            message["References"] = references
 
             # Encode message
             raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode("utf-8")
 
-            print(f"\n" + "=" * 60)
-            print("SENDING EMAIL REPLY")
-            print("=" * 60)
-            print(f"To: {to_email}")
-            print(f"Subject: {reply_subject}")
-            print(f"Thread ID: {email.thread_id}")
-            print("-" * 60)
-            print(reply_body[:200] + "..." if len(reply_body) > 200 else reply_body)
-            print("=" * 60 + "\n")
-
-            # Send message
+            # Send as reply in thread (use threadId for proper threading)
             sent_message = (
                 self.service.users()
                 .messages()
