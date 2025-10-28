@@ -122,8 +122,12 @@ def process_and_respond(workflow: SupportWorkflow, email_handler: GmailHandler, 
         return
 
     if result["status"] == "requires_manual_review":
+        print("EMAIL REQUIRES MANUAL REVIEW - Applying label")
         if hasattr(email_handler, "add_label"):
-            email_handler.add_label(email.id, "NEEDS_REVIEW")
+            success = email_handler.add_label(email.id, "NEEDS_REVIEW")
+        else:
+            print(f"Email handler does not support label functionality")
+        # DO NOT mark as read - keep it unread for visibility
         return
 
     if result["status"] == "completed_approved" and result.get("final_response"):

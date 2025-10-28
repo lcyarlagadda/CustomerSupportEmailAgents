@@ -374,7 +374,7 @@ class GmailHandler:
 
     def add_label(self, email_id: str, label_name: str) -> bool:
         """
-        Add a label to an email.
+        Add a label to an email and verify it was applied.
 
         Args:
             email_id: ID of email
@@ -405,16 +405,47 @@ class GmailHandler:
                 )
                 label_id = created_label["id"]
 
-            # Add label to email
-            self.service.users().messages().modify(
-                userId="me", id=email_id, body={"addLabelIds": [label_id]}
-            ).execute()
+            # Add label to email (also keep it unread for visibility)
+            modified_message = (
+                self.service.users()
+                .messages()
+                .modify(
+                    userId="me",
+                    id=email_id,
+                    body={
+                        "addLabelIds": [label_id],
+                        "removeLabelIds": [],  # Explicitly keep UNREAD label
+                    },
+                )
+                .execute()
+            )
 
-            print(f"Added label '{label_name}' to email {email_id}")
-            return True
+            # Verify label was applied
+            applied_labels = modified_message.get("labelIds", [])
+            if label_id in applied_labels:
+                print(f"Label '{label_name}' successfully applied to email {email_id}")
+                return True
+            else:
+                print(
+                    f"Warning: Label '{label_name}' may not have been applied correctly to email {email_id}"
+                )
+                return False
 
         except HttpError as error:
-            print(f"Error adding label: {error}")
+            error_content = (
+                error.content.decode("utf-8") if hasattr(error, "content") else str(error)
+            )
+            print(f"ERROR: Failed to add label '{label_name}' to email {email_id}")
+            print(f"HTTP Error: {error.resp.status if hasattr(error, 'resp') else 'Unknown'}")
+            print(f"Error Details: {error_content}")
+            return False
+        except Exception as e:
+            import traceback
+
+            print(f"ERROR: Unexpected error adding label '{label_name}' to email {email_id}")
+            print(f"Error: {e}")
+            print(f"Error Type: {type(e).__name__}")
+            print(f"Traceback:\n{traceback.format_exc()}")
             return False
 
     def check_new_support_emails(self, max_results: int = 10) -> List[Email]:

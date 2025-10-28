@@ -290,13 +290,14 @@ Write ONLY the email body (no signature):""",
                         response = "\n".join(lines[i:])
                         break
 
-        # Clean up extra whitespace and normalize indentation
+        # Clean up extra whitespace, tabs, and normalize indentation
         lines = response.split("\n")
         cleaned_lines = []
         for line in lines:
-            stripped = line.strip()
-            if stripped:  # Keep non-empty lines, but remove leading whitespace
-                cleaned_lines.append(stripped)
+            # Remove all tabs and leading/trailing whitespace
+            cleaned_line = line.replace("\t", "").strip()
+            if cleaned_line:  # Keep non-empty lines
+                cleaned_lines.append(cleaned_line)
             elif cleaned_lines:  # Preserve single blank lines between paragraphs
                 if cleaned_lines[-1] != "":
                     cleaned_lines.append("")
@@ -330,10 +331,21 @@ DO NOT include: [placeholders], notes, explanations, signature, or "please let m
         """
         signature_check = ["Thanks,", "TaskFlow Pro Team", "support@taskflowpro.com"]
         if any(sig in email_body for sig in signature_check):
-            return email_body
+            # Already has signature, but clean it up
+            return "\n".join(line.replace("\t", "").rstrip() for line in email_body.split("\n"))
 
-        # Ensure email body ends with newline, then add properly formatted signature
-        email_body = email_body.rstrip() + "\n\n"
+        # Remove any tabs from email body
+        email_body = "\n".join(line.replace("\t", "").rstrip() for line in email_body.split("\n"))
+        email_body = email_body.rstrip()
+
+        # Ensure proper spacing before signature
+        if not email_body.endswith("\n\n"):
+            if email_body.endswith("\n"):
+                email_body += "\n"
+            else:
+                email_body += "\n\n"
+
+        # Add signature with no tabs or extra whitespace
         signature = "Thanks,\nTaskFlow Pro Team\nsupport@taskflowpro.com"
 
         return email_body + signature
