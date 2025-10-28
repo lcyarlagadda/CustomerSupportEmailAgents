@@ -6,7 +6,7 @@ A production-ready multi-agent system for automating customer support email resp
 
 This system automatically processes customer support emails through a sophisticated multi-agent workflow. It categorizes inquiries, retrieves relevant information from product documentation, generates personalized responses, and ensures quality before sending.
 
-**Key Feature: 100% Free** - Uses HuggingFace Transformers. Works on local machines, Google Colab (free GPU!), or any server. No API costs, complete privacy.
+The system supports both local execution using HuggingFace Transformers and cloud-based inference via Groq API for faster processing.
 
 ## Features
 
@@ -14,8 +14,9 @@ This system automatically processes customer support emails through a sophistica
 - **RAG-Powered Responses** - Retrieves accurate information from product documentation to answer questions
 - **Multi-Agent Workflow** - Four specialized agents work together: Classifier, RAG Agent, Response Generator, and QA Agent
 - **Quality Assurance** - Built-in review system with automatic revision loop for sub-par responses
-- **Local Execution** - All processing happens on your machine with no external API calls
-- **Privacy First** - Customer data never leaves your infrastructure
+- **Flexible Deployment** - Supports local execution or cloud-based inference
+- **Privacy First** - Customer data never leaves your infrastructure when using local models
+- **Optimized Performance** - Includes INT8 quantization, parallel processing, and smart caching
 
 ## Architecture
 
@@ -32,10 +33,10 @@ Each email flows through this pipeline with conditional routing based on classif
 
 - **LangGraph** - Multi-agent workflow orchestration
 - **LangChain** - AI framework and RAG implementation
-- **HuggingFace Transformers** - Free LLMs (Llama, Gemma, Phi, etc.) 
-- **Sentence Transformers** - Free local embeddings
+- **HuggingFace Transformers** - Local LLMs (unlimited, private)
+- **Groq API** - Fast cloud-based LLM inference (optional, 14.4k requests/day free tier)
+- **Sentence Transformers** - Local embeddings
 - **ChromaDB** - Vector database for document storage
-- **PyTorch** - Deep learning framework
 - **Python 3.9+** - Core runtime
 
 ## Installation
@@ -52,20 +53,15 @@ Each email flows through this pipeline with conditional routing based on classif
 pip install -r requirements.txt
 ```
 
-### Step 2: (Optional) Set HuggingFace Token
+### Step 2: Set HuggingFace Token (Optional)
 
 For gated models like Llama:
 
 1. Get token at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)
-2. Accept model license at [Llama 3.2](https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct)
-3. Set environment variable:
+2. Accept model license at the model's HuggingFace page
+3. Create `.env` file:
 
 ```bash
-export HF_TOKEN=your_token_here
-```
-
-Or create `.env` file:
-```
 HF_TOKEN=your_token_here
 ```
 
@@ -86,7 +82,7 @@ First run will download the embedding model (~90MB). Subsequent runs use cached 
 Run the system in batch mode to process all current emails:
 
 ```bash
-python main.py --mode batch
+python main.py --mode batch --mock-emails
 ```
 
 For continuous monitoring:
@@ -95,58 +91,63 @@ For continuous monitoring:
 python main.py --mode continuous
 ```
 
-### Google Colab (Free GPU!)
+### Using Groq API (Optional, Faster)
 
-Perfect for testing without local setup:
-
-1. Open [Google Colab](https://colab.research.google.com)
-2. Enable GPU (Runtime → Change runtime type → GPU)
-3. See **[COLAB_SETUP.md](COLAB_SETUP.md)** for complete instructions
-
-By default, the system includes 5 mock emails for testing. See Configuration section to connect real email.
+1. Get free API key: [console.groq.com/keys](https://console.groq.com/keys)
+2. Add to `.env`:
+```bash
+LLM_PROVIDER=groq
+GROQ_API_KEY=your_key_here
+GROQ_MODEL=llama-3.1-8b-instant
+```
 
 ## Configuration
 
 ### Environment Variables
 
-Create a `.env` file in the project root (optional):
+Create a `.env` file in the project root:
 
 ```bash
-# LLM Model (optional, default shown)
+# LLM Provider: "groq" or "huggingface"
+LLM_PROVIDER=huggingface
+
+# HuggingFace Configuration
 LLM_MODEL=meta-llama/Llama-3.2-1B-Instruct
-
-# HuggingFace Token (for gated models)
 HF_TOKEN=your_token_here
-
-# GPU usage (optional)
 USE_GPU=auto  # auto, true, false
 
-# Email settings  
+# Groq Configuration (optional)
+GROQ_MODEL=llama-3.1-8b-instant
+GROQ_API_KEY=your_key_here
+
+# Email settings
 GMAIL_EMAIL=support@taskflowpro.com
 ```
 
 ### Available Models
 
-All models from [HuggingFace Hub](https://huggingface.co/models?pipeline_tag=text-generation) work. Recommended:
-
+**HuggingFace Models:**
 - `meta-llama/Llama-3.2-1B-Instruct` - 1B params, fast, good quality (default)
-- `meta-llama/Llama-3.2-3B-Instruct` - 3B params, better quality, needs more VRAM
-- `google/gemma-2-2b-it` - 2B params, good alternative
+- `meta-llama/Llama-3.2-3B-Instruct` - 3B params, better quality
+- `google/gemma-2-2b-it` - 2B params, alternative option
 - `microsoft/phi-2` - 2.7B params, compact and efficient
 
-**For Colab**: Use 1B-3B models (free T4 GPU has ~15GB VRAM)
+**Groq Models:**
+- `llama-3.1-8b-instant` - Fast, recommended default
+- `llama-3.3-70b-versatile` - Higher quality
+- `mixtral-8x7b-32768` - Excellent with 32k context
 
 ### Command Line Options
 
 ```bash
 # Batch mode (process once and exit)
-python main.py --mode batch
+python main.py --mode batch --mock-emails
 
 # Continuous monitoring
 python main.py --mode continuous
 
 # Adjust maximum revision attempts
-python main.py --max-revisions 3
+python main.py --max-revisions 3 --mock-emails
 ```
 
 ## Project Structure
@@ -156,16 +157,20 @@ ProductSupportAgents/
 ├── agents/
 │   ├── classifier.py          # Email classification agent
 │   ├── rag_agent.py           # RAG retrieval agent
-│   ├── response_generator.py # Response drafting agent
+│   ├── response_generator.py  # Response drafting agent
 │   └── qa_agent.py            # Quality assurance agent
 ├── workflows/
 │   └── support_workflow.py    # LangGraph workflow orchestration
 ├── utils/
 │   ├── config.py              # Configuration management
-│   ├── email_handler.py       # Email operations (mock/production)
-│   └── vector_store.py        # Vector database management
+│   ├── email_handler.py       # Email operations
+│   ├── vector_store.py        # Vector database management
+│   ├── llm_loader.py          # HuggingFace LLM loader
+│   ├── groq_loader.py         # Groq API loader
+│   └── unified_llm_loader.py  # Unified LLM provider interface
 ├── data/
-│   └── product_docs/          # Product documentation (markdown)
+│   ├── product_docs/          # Product documentation (markdown)
+│   └── test_emails/           # Test email JSON files
 ├── main.py                    # Main execution script
 ├── setup_vectorstore.py       # Vector store initialization
 └── requirements.txt           # Python dependencies
@@ -175,21 +180,31 @@ ProductSupportAgents/
 
 ### Email Processing Flow
 
-1. **Receive** - System monitors inbox for new emails
+1. **Receive** - System monitors inbox for new emails (or uses mock emails for testing)
 2. **Classify** - Email categorized and prioritized
 3. **Retrieve** - Relevant documentation fetched via RAG
-4. **Generate** - Personalized response drafted
+4. **Generate** - Personalized response drafted with standardized format
 5. **Review** - Quality check with automatic revision if needed
 6. **Send** - Approved response delivered to customer
 
 ### Supported Categories
 
-- **Technical Support** - Login issues, bugs, errors
-- **Product Inquiry** - Feature questions, how-to guides
-- **Billing** - Subscriptions, payments, invoicing
-- **Feature Request** - Enhancement suggestions
-- **Feedback** - General comments and reviews
+- **Technical Support** - Login issues, bugs, errors (uses documentation or escalates)
+- **Product Inquiry** - Feature questions, how-to guides (answers from documentation)
+- **Billing** - Subscriptions, payments, invoicing (always escalated)
+- **Feature Request** - Enhancement suggestions (saved to file, acknowledgment sent)
+- **Feedback** - General comments and reviews (saved to file, acknowledgment sent)
 - **Unrelated** - Spam or off-topic (auto-filtered)
+
+### Response Format
+
+All responses follow a standardized format:
+
+1. Salutation
+2. Acknowledgment (apologize for issues, appreciate feedback)
+3. Main content (solution, information, or escalation notice)
+4. Closing: "Hope you have a great day!"
+5. Signature: TaskFlow Pro Team
 
 ### Quality Assurance
 
@@ -199,13 +214,39 @@ Each response receives a quality score (0-10):
 - **7.0-7.9** - Approved with minor notes
 - **Below 7.0** - Triggers revision or manual review
 
+Escalation responses are automatically approved as they appropriately route to specialists.
+
+## Performance
+
+### Performance Metrics
+
+| Configuration | Speed | Throughput |
+|---------------|-------|------------|
+| CPU (local) | 10-12s | ~300 emails/hour |
+| GPU (local, INT8) | 3-6s | ~600-1200 emails/hour |
+| Groq API | 1-2s | ~1800-3600 emails/hour |
+| Cached responses | <1s | Instant |
+
+### Optimizations Included
+
+- **INT8 Quantization** - 2-3x faster on GPU (auto-enabled)
+- **Parallel Processing** - RAG retrieval runs concurrently
+- **Smart Caching** - Similar emails answered instantly
+- **Token Optimization** - Agents use optimized token limits
+- **Prompt Optimization** - Concise, focused prompts
+
+### Benchmark Your System
+
+```bash
+python benchmark_performance.py
+```
+
 ## Customization
 
 ### Add Your Product Documentation
 
 1. Place markdown files in `data/product_docs/`
 2. Rebuild vector store: `python setup_vectorstore.py`
-3. Test retrieval: `python agents/rag_agent.py`
 
 ### Modify Response Templates
 
@@ -217,29 +258,7 @@ Update `EMAIL_CATEGORIES` dictionary in `utils/config.py`
 
 ### Change LLM Model
 
-In `.env` file:
-```bash
-OLLAMA_MODEL=mistral
-```
-
-## Performance
-
-### Processing Speed (llama3.1 on CPU)
-
-- Classification: 2-4 seconds
-- RAG Retrieval: 1 second  
-- Response Generation: 5-8 seconds
-- QA Review: 3-5 seconds
-- **Total: ~15-20 seconds per email**
-
-### With GPU
-
-3-5x faster with NVIDIA GPU (automatically detected by Ollama)
-
-### Throughput
-
-- **Sequential**: ~180 emails/hour
-- **With optimization**: ~300 emails/hour
+Update `.env` file with desired model name.
 
 ## Testing
 
@@ -266,27 +285,27 @@ python workflows/support_workflow.py
 
 ### Connecting Real Email
 
-The system currently uses mock emails for testing. To connect Gmail:
+The system uses mock emails by default. To connect Gmail:
 
 1. Enable Gmail API in Google Cloud Console
-2. Download `credentials.json`
-3. Update `utils/email_handler.py` with production Gmail code (see inline comments)
-4. Run system - first run will prompt for authentication
+2. Download `credentials.json` to project root
+3. Run system - first run will prompt for authentication
+4. Remove `--mock-emails` flag from command
 
 ### Scaling Considerations
 
 - Run on dedicated server with adequate RAM
-- Use GPU for faster inference
+- Use GPU for faster inference or Groq API for cloud speed
 - Implement load balancing for high volume
 - Add monitoring and alerting
 - Set up log aggregation
 
 ### Security
 
-- All data processed locally
-- No external API calls (except email sending/receiving)
+- All data processed locally when using HuggingFace models
+- No external API calls for LLM inference (unless using Groq)
 - Suitable for sensitive customer data
-- GDPR/HIPAA compliant (data never leaves infrastructure)
+- GDPR/HIPAA compliant when using local models
 
 ## System Requirements
 
@@ -306,71 +325,53 @@ The system currently uses mock emails for testing. To connect Gmail:
 
 ## Troubleshooting
 
-### "Model not found" or "Could not load model"
+### Model Loading Issues
 
-1. Check HF_TOKEN is set (for gated models)
+1. Check `HF_TOKEN` is set (for gated models)
 2. Accept model license on HuggingFace
-3. Try a different model:
-```bash
-export LLM_MODEL=google/gemma-2-2b-it
-```
+3. Try a different model
 
-### "CUDA out of memory"
+### CUDA Out of Memory
 
-Use a smaller model:
-```bash
-export LLM_MODEL=meta-llama/Llama-3.2-1B-Instruct
-```
+Use a smaller model or force CPU:
 
-Or force CPU:
 ```bash
 export USE_GPU=false
-```
-
-### "Transformers not installed"
-
-```bash
-pip install transformers torch accelerate
 ```
 
 ### Slow Performance
 
 - Close other applications
-- Use smaller model (llama3.2)
+- Use smaller model
 - Reduce `--max-revisions` to 1
-- Consider using GPU
+- Consider using Groq API
+- Enable GPU if available
 
 ### Vector Store Errors
 
 Reinitialize the vector store:
+
 ```bash
 python setup_vectorstore.py
 ```
-
-## Cost Analysis
-
-**Traditional System (with OpenAI API):**
-- 1,000 emails/month: ~$10-15
-- 10,000 emails/month: ~$100-150
-
-**This System (with Ollama):**
-- Unlimited emails: $0
-- Only cost: electricity (~$1-2/month)
-
-**Annual savings: $120-1,800 depending on volume**
 
 ## Privacy & Security
 
 ### Data Privacy
 
+When using local HuggingFace models:
 - All processing happens locally
 - Customer emails never sent to external APIs
 - LLM runs on your infrastructure
 - Complete control over data
 
+When using Groq API:
+- Email content is sent to Groq's servers
+- Review Groq's privacy policy for compliance requirements
+
 ### Compliance
 
-Suitable for:
+Suitable for various compliance requirements when using local models:
 - GDPR (EU data protection)
 - HIPAA (healthcare data)
 - SOC 2 requirements
@@ -399,35 +400,14 @@ python utils/vector_store.py
 
 ## Limitations
 
-- Mock email handler (requires Gmail API integration for production)
+- Mock email handler by default (requires Gmail API integration for production)
 - English language only (extensible to other languages)
 - Synchronous processing (can be parallelized)
-- Local vector store (can be upgraded to Pinecone/Weaviate)
-
-## Future Enhancements
-
-Potential improvements:
-- Multi-language support
-- Sentiment analysis and escalation
-- Analytics dashboard
-- Conversation history tracking
-- Integration with ticketing systems
-- A/B testing different response styles
-
-## Contributing
-
-This is a demonstration project showing production-ready AI engineering practices. Feel free to fork and adapt for your needs.
+- Local vector store (can be upgraded to cloud services)
 
 ## License
 
 MIT License - see LICENSE file for details
-
-## Support
-
-For issues or questions:
-- Check troubleshooting section above
-- Review code comments and docstrings
-- Test components individually to isolate issues
 
 ## Acknowledgments
 
@@ -437,18 +417,3 @@ Built with:
 - [HuggingFace](https://huggingface.co) - LLM models and embeddings
 - [PyTorch](https://pytorch.org) - Deep learning framework
 - [ChromaDB](https://www.trychroma.com) - Vector database
-
-Special thanks to Meta (Llama), Google (Gemma), and Microsoft (Phi) for open-source models.
-
----
-
-**Ready to automate your customer support? Start with:**
-
-```bash
-pip install -r requirements.txt
-python setup_vectorstore.py
-python main.py
-```
-
-**Or try on Colab (free GPU!):** See [COLAB_SETUP.md](COLAB_SETUP.md)
-

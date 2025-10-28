@@ -43,6 +43,7 @@ credentials.json
 # Logs
 logs/
 *.log
+feedback_logs/
 
 *.md
 
