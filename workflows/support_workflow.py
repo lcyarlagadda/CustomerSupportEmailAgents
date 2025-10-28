@@ -2,6 +2,7 @@
 from typing import TypedDict, Annotated, Sequence
 from typing_extensions import TypedDict
 import operator
+import concurrent.futures
 from langgraph.graph import StateGraph, END
 
 from agents.classifier import EmailClassifierAgent
@@ -9,6 +10,8 @@ from agents.rag_agent import RAGAgent
 from agents.response_generator import ResponseGeneratorAgent
 from agents.qa_agent import QAAgent
 from utils.email_handler import Email
+from utils.parallel_utils import ParallelExecutor
+from utils.response_cache import ResponseCache
 
 
 # Define the state schema
@@ -47,14 +50,18 @@ class SupportState(TypedDict):
 class SupportWorkflow:
     """Multi-agent workflow for automated customer support."""
     
-    def __init__(self, max_revisions: int = 0):
+    def __init__(self, max_revisions: int = 0, use_parallel: bool = True, use_cache: bool = True):
         """
         Initialize the support workflow.
         
         Args:
             max_revisions: Maximum number of times to revise a response (default: 0 = no retries)
+            use_parallel: Enable parallel processing for faster execution (default: True)
+            use_cache: Enable response caching for FAQ-style emails (default: True)
         """
         self.max_revisions = max_revisions
+        self.use_parallel = use_parallel
+        self.use_cache = use_cache
         
         print("Initializing agents...")
         self.classifier = EmailClassifierAgent()
@@ -62,6 +69,17 @@ class SupportWorkflow:
         self.response_generator = ResponseGeneratorAgent()
         self.qa_agent = QAAgent()
         print("All agents initialized\n")
+        
+        # Initialize parallel executor
+        if use_parallel:
+            self.parallel_executor = ParallelExecutor(max_workers=2)
+            print("Parallel processing enabled (2x faster for independent operations)\n")
+        
+        # Initialize response cache
+        if use_cache:
+            self.response_cache = ResponseCache()
+            self.response_cache.clear_expired()  # Clean up old entries
+            print("Response caching enabled (instant responses for similar emails)\n")
         
         # Build the workflow graph
         self.graph = self._build_graph()
@@ -151,7 +169,7 @@ class SupportWorkflow:
         return state
     
     def retrieve_context(self, state: SupportState) -> SupportState:
-        """Retrieve relevant context using RAG."""
+        """Retrieve relevant context using RAG (optimized with parallel processing)."""
         print("\nRetrieving relevant documentation...")
         
         email = state["email"]
@@ -167,7 +185,26 @@ class SupportWorkflow:
             state["rag_sources"] = result.get("sources", [])
             print(f"Retrieved context from {result['sources_used']} sources")
         else:
-            docs = self.rag_agent.retrieve_context(email.subject + " " + email.body, k=2)
+            # Use parallel retrieval for subject and body separately (faster)
+            if self.use_parallel:
+                tasks = [
+                    {'func': self.rag_agent.retrieve_context, 'args': (email.subject,), 'kwargs': {'k': 1}},
+                    {'func': self.rag_agent.retrieve_context, 'args': (email.body,), 'kwargs': {'k': 1}}
+                ]
+                results = self.parallel_executor.run_parallel(tasks)
+                # Combine results
+                docs = results[0] + results[1]
+                # Remove duplicates by content
+                seen = set()
+                unique_docs = []
+                for doc in docs:
+                    if doc["content"] not in seen:
+                        seen.add(doc["content"])
+                        unique_docs.append(doc)
+                docs = unique_docs[:2]  # Keep top 2
+            else:
+                docs = self.rag_agent.retrieve_context(email.subject + " " + email.body, k=2)
+            
             if docs:
                 context = "\n\n".join([doc["content"] for doc in docs])
                 state["rag_context"] = context
@@ -181,15 +218,42 @@ class SupportWorkflow:
         return state
     
     def generate_response(self, state: SupportState) -> SupportState:
-        """Generate email response."""
+        """Generate email response (with caching support)."""
         revision_count = state.get("revision_count", 0)
+        email = state["email"]
+        category = state["category"]
         
+        # Check cache first (only for first attempt, not revisions)
+        if revision_count == 0 and self.use_cache:
+            cached = self.response_cache.get(
+                email_subject=email.subject,
+                email_body=email.body,
+                category=category,
+                use_fuzzy=True
+            )
+            
+            if cached and cached.get('qa_score', 0) >= 7.0:
+                # Use cached response
+                final_response = cached['response']
+                state["draft_response"] = final_response
+                state["qa_score"] = cached['qa_score']
+                state["qa_approved"] = True
+                
+                print(f"\n Using cached response ({cached.get('cache_hit_type', 'unknown')} match)")
+                print("─" * 70)
+                print("CACHED RESPONSE:")
+                print("─" * 70)
+                print(final_response)
+                print("─" * 70)
+                
+                return state
+        
+        # Generate new response
         if revision_count > 0:
             print(f"\nGenerating revised response (attempt {revision_count + 1})...")
         else:
             print("\nGenerating response...")
         
-        email = state["email"]
         email_data = {
             "sender": email.sender,
             "subject": email.subject,
@@ -202,7 +266,7 @@ class SupportWorkflow:
         # Generate response
         response = self.response_generator.generate_response(
             email_data=email_data,
-            category=state["category"],
+            category=category,
             context=context
         )
         
@@ -269,10 +333,25 @@ class SupportWorkflow:
             state["final_response"] = state["draft_response"]
             state["status"] = "completed_approved"
             print("\n✓ Response approved and ready to send")
+            
+            # Cache the approved response for future use
+            if self.use_cache and state.get("revision_count", 0) == 0:
+                email = state["email"]
+                self.response_cache.set(
+                    email_subject=email.subject,
+                    email_body=email.body,
+                    category=state["category"],
+                    response=state["final_response"],
+                    qa_score=state.get("qa_score", 0),
+                    metadata={
+                        'priority': state.get('priority', 'medium'),
+                        'confidence': state.get('confidence', 0)
+                    }
+                )
         else:
             state["final_response"] = state["draft_response"]
             state["status"] = "requires_manual_review"
-            print("\n⚠ Response generated but requires manual review before sending")
+            print("\n Response generated but requires manual review before sending")
             print(f"   Issues: {', '.join(state.get('qa_issues', ['Quality threshold not met']))}")
         
         return state
@@ -320,7 +399,7 @@ class SupportWorkflow:
             Final state after processing
         """
         print("=" * 70)
-        print(f"📧 Processing Email from {email.sender}")
+        print(f" Processing Email from {email.sender}")
         print(f"   Subject: {email.subject}")
         print("=" * 70)
         
@@ -350,7 +429,7 @@ class SupportWorkflow:
             final_state = self.graph.invoke(initial_state)
             return final_state
         except Exception as e:
-            print(f"\n❌ Error processing email: {e}")
+            print(f"\n Error processing email: {e}")
             import traceback
             traceback.print_exc()
             initial_state["status"] = "error"

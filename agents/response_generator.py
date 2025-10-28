@@ -10,7 +10,8 @@ class ResponseGeneratorAgent:
     
     def __init__(self):
         """Initialize the response generator agent."""
-        pipe = load_llm_pipeline(temperature=0.8)
+        # Response generation needs longer outputs - use 400 tokens (reduced from 512)
+        pipe = load_llm_pipeline(temperature=0.8, max_tokens=400)
         self.llm = HuggingFacePipeline(pipeline=pipe)
         
         # Prompts for different email categories (string templates)

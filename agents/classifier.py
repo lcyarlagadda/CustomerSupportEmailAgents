@@ -32,7 +32,8 @@ class EmailClassifierAgent:
     
     def __init__(self):
         """Initialize the classifier agent."""
-        pipe = load_llm_pipeline(temperature=0.3)  # Lower temperature for more consistent classification
+        # Classification needs short responses - use 128 tokens instead of 512
+        pipe = load_llm_pipeline(temperature=0.3, max_tokens=128)  # Lower temperature for more consistent classification
         self.llm = HuggingFacePipeline(pipeline=pipe)
         
         self.parser = PydanticOutputParser(pydantic_object=EmailClassification)

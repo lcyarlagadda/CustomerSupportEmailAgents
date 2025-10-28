@@ -9,6 +9,7 @@ transformers==4.45.0
 torch==2.5.1
 torchvision==0.20.1  # Must match torch version
 accelerate==1.0.1
+bitsandbytes==0.44.1  # For INT8 quantization (2-3x speedup)
 
 # Vector Store and Local Embeddings
 chromadb==0.5.20

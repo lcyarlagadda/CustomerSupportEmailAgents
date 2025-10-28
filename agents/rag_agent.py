@@ -13,7 +13,8 @@ class RAGAgent:
     
     def __init__(self):
         """Initialize the RAG agent."""
-        pipe = load_llm_pipeline(temperature=0.7)
+        # RAG synthesis needs moderate length responses - use 256 tokens
+        pipe = load_llm_pipeline(temperature=0.7, max_tokens=256)
         self.llm = HuggingFacePipeline(pipeline=pipe)
         
         self.vector_store = VectorStoreManager()

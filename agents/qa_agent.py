@@ -36,7 +36,8 @@ class QAAgent:
     
     def __init__(self):
         """Initialize the QA agent."""
-        pipe = load_llm_pipeline(temperature=0.5)  # Slightly higher for varied evaluations
+        # QA evaluation needs short responses - use 150 tokens
+        pipe = load_llm_pipeline(temperature=0.5, max_tokens=150)  # Slightly higher for varied evaluations
         self.llm = HuggingFacePipeline(pipeline=pipe)
         
         self.parser = PydanticOutputParser(pydantic_object=QAResult)
