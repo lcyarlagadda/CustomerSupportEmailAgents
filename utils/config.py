@@ -12,11 +12,17 @@ DATA_DIR = PROJECT_ROOT / "data"
 PRODUCT_DOCS_DIR = DATA_DIR / "product_docs"
 VECTOR_DB_DIR = PROJECT_ROOT / "vectorstore"
 
-# LLM Configuration - Using HuggingFace (free, works on Colab)
-LLM_PROVIDER = "huggingface"
-LLM_MODEL = os.getenv("LLM_MODEL", "meta-llama/Llama-3.2-1B-Instruct")  # Llama 3.2 1B for Colab
-LLM_TEMPERATURE = 0.7
+# LLM Configuration
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "huggingface")  # "groq" or "huggingface"
+
+# Groq Configuration (fastest - 1-2s per email, FREE 14.4k requests/day) ⚡
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.2-3b-preview")  # llama-3.2-3b-preview, mixtral-8x7b-32768, etc.
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")  # Get FREE key at: https://console.groq.com/keys
+
+# HuggingFace Configuration (local - unlimited, FREE forever)
+LLM_MODEL = os.getenv("LLM_MODEL", "meta-llama/Llama-3.2-1B-Instruct")  # For HuggingFace
 USE_GPU = os.getenv("USE_GPU", "auto")  # auto, true, false
+LLM_TEMPERATURE = 0.7
 
 # Embedding Configuration - Using local HuggingFace embeddings (free)
 EMBEDDING_MODEL = "all-MiniLM-L6-v2"  # Fast and efficient local embeddings

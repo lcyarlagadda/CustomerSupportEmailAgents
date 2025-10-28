@@ -1,12 +1,11 @@
 """Quality Assurance agent for reviewing email responses."""
 from typing import Dict, Any
-from langchain_community.llms import HuggingFacePipeline
 from langchain.output_parsers import PydanticOutputParser
 from pydantic import BaseModel, Field
 import json
 import re
 
-from utils.llm_loader import load_llm_pipeline
+from utils.unified_llm_loader import load_llm
 
 
 class QAResult(BaseModel):
@@ -37,8 +36,7 @@ class QAAgent:
     def __init__(self):
         """Initialize the QA agent."""
         # QA evaluation needs short responses - use 150 tokens
-        pipe = load_llm_pipeline(temperature=0.5, max_tokens=150)  # Slightly higher for varied evaluations
-        self.llm = HuggingFacePipeline(pipeline=pipe)
+        self.llm = load_llm(temperature=0.5, max_tokens=150)  # Slightly higher for varied evaluations
         
         self.parser = PydanticOutputParser(pydantic_object=QAResult)
         

@@ -4,6 +4,9 @@ langchain-community==0.3.5
 langchain-core==0.3.15
 langgraph==0.2.45
 
+# Groq API (optional - blazing fast inference, FREE 14.4k requests/day)
+langchain-groq==0.2.1
+
 # HuggingFace for LLM and Embeddings (free, works on Colab)
 transformers==4.45.0
 torch==2.5.1

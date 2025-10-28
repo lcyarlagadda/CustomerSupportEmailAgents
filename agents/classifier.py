@@ -1,6 +1,5 @@
 """Email classification agent."""
 from typing import Dict, Any
-from langchain_community.llms import HuggingFacePipeline
 from langchain.prompts import PromptTemplate
 from langchain.output_parsers import PydanticOutputParser
 from pydantic import BaseModel, Field
@@ -8,7 +7,7 @@ import json
 import re
 
 from utils.config import EMAIL_CATEGORIES
-from utils.llm_loader import load_llm_pipeline
+from utils.unified_llm_loader import load_llm
 
 
 class EmailClassification(BaseModel):
@@ -33,8 +32,7 @@ class EmailClassifierAgent:
     def __init__(self):
         """Initialize the classifier agent."""
         # Classification needs short responses - use 128 tokens instead of 512
-        pipe = load_llm_pipeline(temperature=0.3, max_tokens=128)  # Lower temperature for more consistent classification
-        self.llm = HuggingFacePipeline(pipeline=pipe)
+        self.llm = load_llm(temperature=0.3, max_tokens=128)  # Lower temperature for more consistent classification
         
         self.parser = PydanticOutputParser(pydantic_object=EmailClassification)
         

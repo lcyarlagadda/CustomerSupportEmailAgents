@@ -1,8 +1,7 @@
 """Response generation agent for crafting email replies."""
 from typing import Dict, Any, Optional
-from langchain_community.llms import HuggingFacePipeline
 
-from utils.llm_loader import load_llm_pipeline
+from utils.unified_llm_loader import load_llm
 
 
 class ResponseGeneratorAgent:
@@ -11,8 +10,7 @@ class ResponseGeneratorAgent:
     def __init__(self):
         """Initialize the response generator agent."""
         # Response generation needs longer outputs - use 400 tokens (reduced from 512)
-        pipe = load_llm_pipeline(temperature=0.8, max_tokens=400)
-        self.llm = HuggingFacePipeline(pipeline=pipe)
+        self.llm = load_llm(temperature=0.8, max_tokens=400)
         
         # Prompts for different email categories (string templates)
         self.prompts = {

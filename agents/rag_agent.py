@@ -1,11 +1,10 @@
 """RAG (Retrieval-Augmented Generation) agent for product documentation queries."""
 from typing import List, Dict, Any
 from langchain.schema import Document
-from langchain_community.llms import HuggingFacePipeline
 
 from utils.config import TOP_K_RESULTS
 from utils.vector_store import VectorStoreManager
-from utils.llm_loader import load_llm_pipeline
+from utils.unified_llm_loader import load_llm
 
 
 class RAGAgent:
@@ -14,8 +13,7 @@ class RAGAgent:
     def __init__(self):
         """Initialize the RAG agent."""
         # RAG synthesis needs moderate length responses - use 256 tokens
-        pipe = load_llm_pipeline(temperature=0.7, max_tokens=256)
-        self.llm = HuggingFacePipeline(pipeline=pipe)
+        self.llm = load_llm(temperature=0.7, max_tokens=256)
         
         self.vector_store = VectorStoreManager()
         try:
