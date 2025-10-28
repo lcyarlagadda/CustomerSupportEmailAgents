@@ -37,71 +37,64 @@ def print_banner():
 
 def print_email_details(email):
     """Print original email details."""
+    print("\n" + "=" * 70)
     print("ORIGINAL EMAIL")
+    print("=" * 70)
     print(f"From:     {email.sender}")
     print(f"Subject:  {email.subject}")
-    print(f"Received: {email.received_at.strftime('%Y-%m-%d %H:%M:%S')}")
-    print("Body:")
-    print(email.body[:300] + "..." if len(email.body) > 300 else email.body)
-
-
-def print_classification(state: dict):
-    """Print classification results."""
-    print("AI CLASSIFICATION")
-    print(f"Category:    {state['category'].upper()}")
-    print(f"Priority:    {state['priority'].upper()}")
-    print(f"Confidence:  {state['confidence']:.1%}")
-    print(f"Reasoning:   {state.get('reasoning', 'N/A')[:100]}...")
+    print("=" * 70)
 
 
 def print_response(state: dict):
     """Print generated response."""
     response = state.get("final_response") or state.get("draft_response")
     if response:
-        print("FINAL GENERATED RESPONSE")
+        print("\n" + "=" * 70)
+        print("RESPONSE")
+        print("=" * 70)
         print(response)
+        print("=" * 70)
 
 
 def print_qa_results(state: dict):
     """Print QA results."""
-    print("QUALITY ASSURANCE RESULTS")
+    print("\n" + "=" * 70)
+    print("QA RESULTS")
+    print("=" * 70)
     print(f"Quality Score: {state.get('qa_score', 0):.1f}/10")
-    print(f"Status:        {'APPROVED' if state.get('qa_approved') else 'NEEDS REVISION'}")
+    print(f"Approved:      {'Yes' if state.get('qa_approved') else 'No'}")
 
     if state.get("qa_issues"):
-        print(f"\nIssues Found:")
-        for issue in state["qa_issues"]:
+        print(f"\nIssues:")
+        for issue in state["qa_issues"][:3]:
             print(f"  - {issue}")
-
-    if state.get("qa_suggestions"):
-        print(f"\nSuggestions:")
-        for suggestion in state["qa_suggestions"]:
-            print(f"  - {suggestion}")
-
-    if state.get("tone_assessment"):
-        print(f"\nTone: {state['tone_assessment']}")
-
-    print("=" * 70 + "\n")
+    print("=" * 70)
 
 
-def print_final_action(state: dict):
-    """Print final action taken."""
-    print("FINAL ACTION")
+def print_final_status(state: dict):
+    """Print final status."""
+    print("\n" + "=" * 70)
+    print("FINAL STATUS")
+    print("=" * 70)
 
     status = state["status"]
+
     if status == "completed_skipped":
-        print(f"SKIPPED - Category: {state['category']}")
-        print("  Reason: Unrelated to product support")
+        print(f"SKIPPED - Category: {state.get('category', 'unrelated').upper()}")
     elif status == "error":
         print(f"ERROR - {state.get('error_message', 'Unknown error')}")
     elif status == "completed_approved":
-        print("SENT - Email response sent to customer")
+        if state.get("feedback_saved"):
+            category = state.get("category", "").replace("_", " ").title()
+            print(f"ADDED TO FEEDBACK LOG - {category}")
+            if state.get("feedback_file"):
+                print(f"  Log file: {state['feedback_file']}")
+        else:
+            print("SENT - Email response sent to customer")
     elif status == "requires_manual_review":
-        print("REQUIRES MANUAL REVIEW")
-        print("  Reason: QA check did not pass")
-        print("  Action: Review and edit response before sending")
+        print("NEEDS MANUAL REVIEW - QA check did not pass")
     else:
-        print(f"PENDING - Status: {status}")
+        print(f"Status: {status}")
 
     print("=" * 70 + "\n")
 
@@ -109,26 +102,18 @@ def print_final_action(state: dict):
 def process_and_respond(workflow: SupportWorkflow, email_handler: GmailHandler, email):
     """Process an email and send response if approved."""
 
-    # 1. Show original email
     print_email_details(email)
 
-    # 2. Process through workflow
     result = workflow.process_email(email)
 
-    # 3. Show classification
-    print_classification(result)
-
-    # 4. Show generated response (if any)
     if result.get("final_response"):
         print_response(result)
 
-    # 5. Show QA results
-    print_qa_results(result)
+    if result.get("qa_score", 0) > 0:
+        print_qa_results(result)
 
-    # 6. Show final action
-    print_final_action(result)
+    print_final_status(result)
 
-    # 7. Execute action
     if result["status"] == "completed_skipped":
         email_handler.mark_as_read(email.id)
         return
@@ -137,16 +122,14 @@ def process_and_respond(workflow: SupportWorkflow, email_handler: GmailHandler, 
         return
 
     if result["status"] == "requires_manual_review":
-        # Don't send, mark for manual review
         if hasattr(email_handler, "add_label"):
             email_handler.add_label(email.id, "NEEDS_REVIEW")
-        print("Email marked for manual review (not sent automatically)\n")
         return
 
     if result["status"] == "completed_approved" and result.get("final_response"):
-        email_handler.send_reply(email=email, reply_body=result["final_response"])
+        if not result.get("feedback_saved"):
+            email_handler.send_reply(email=email, reply_body=result["final_response"])
         email_handler.mark_as_read(email.id)
-        print("Email sent successfully\n")
 
 
 def run_continuous_monitoring(workflow: SupportWorkflow, email_handler: GmailHandler):
@@ -165,9 +148,7 @@ def run_continuous_monitoring(workflow: SupportWorkflow, email_handler: GmailHan
 
                 for email in new_emails:
                     processed_count += 1
-                    print(f"\n{'=' * 70}")
-                    print(f"Processing Email #{processed_count}")
-                    print(f"{'=' * 70}\n")
+                    print(f"\nProcessing Email #{processed_count}")
 
                     process_and_respond(workflow, email_handler, email)
 

@@ -13,6 +13,7 @@ from agents.qa_agent import QAAgent
 from utils.email_handler import Email
 from utils.parallel_utils import ParallelExecutor
 from utils.response_cache import ResponseCache
+from utils.unified_llm_loader import load_llm
 
 
 # Define the state schema
@@ -129,16 +130,10 @@ class SupportWorkflow:
 
     def classify_email(self, state: SupportState) -> SupportState:
         """Classify the incoming email."""
-        print("Classifying email...")
-
         email = state["email"]
         email_data = {"sender": email.sender, "subject": email.subject, "body": email.body}
 
         classification = self.classifier.classify(email_data)
-
-        print(f"Category: {classification.category}")
-        print(f"Priority: {classification.priority}")
-        print(f"Confidence: {classification.confidence:.2f}")
 
         state["category"] = classification.category
         state["priority"] = classification.priority
@@ -152,18 +147,14 @@ class SupportWorkflow:
     def check_should_process(self, state: SupportState) -> SupportState:
         """Check if email should be processed."""
         if not state["should_process"]:
-            print(f"Skipping email (category: {state['category']})")
             state["status"] = "skipped"
         else:
-            print("Email will be processed")
             state["status"] = "processing"
 
         return state
 
     def retrieve_context(self, state: SupportState) -> SupportState:
         """Retrieve relevant context using RAG (optimized with parallel processing)."""
-        print("\nRetrieving relevant documentation...")
-
         email = state["email"]
         category = state["category"]
 
@@ -172,7 +163,6 @@ class SupportWorkflow:
             result = self.rag_agent.answer_question(email.body, return_sources=True)
             state["rag_context"] = result["answer"]
             state["rag_sources"] = result.get("sources", [])
-            print(f"Retrieved context from {result['sources_used']} sources")
         else:
             # Use parallel retrieval for subject and body separately (faster)
             if self.use_parallel:
@@ -206,16 +196,69 @@ class SupportWorkflow:
                 context = "\n\n".join([doc["content"] for doc in docs])
                 state["rag_context"] = context
                 state["rag_sources"] = docs
-                print(f"Retrieved {len(docs)} relevant documentation sections")
             else:
                 state["rag_context"] = ""
                 state["rag_sources"] = []
-                print("No specific documentation found")
 
         return state
 
+    def _extract_feedback(self, email_body: str, category: str) -> str:
+        """Extract the core feedback or feature request from email body using LLM."""
+        llm = load_llm(temperature=0.3, max_tokens=200)
+
+        prompt = f"""Extract ONLY the feedback or feature request from this email. Remove greetings, salutations, personal anecdotes, and closing statements. Return just the core feedback or feature suggestion in 1-3 concise sentences.
+
+Category: {category}
+Email Body:
+{email_body}
+
+Extracted feedback/feature:"""
+
+        try:
+            raw_response = llm.invoke(prompt)
+
+            if hasattr(raw_response, "content"):
+                extracted = raw_response.content.strip()
+            else:
+                extracted = str(raw_response).strip()
+
+            # Clean up any artifacts
+            extracted = extracted.replace("Extracted feedback/feature:", "").strip()
+            extracted = extracted.replace("Feedback:", "").strip()
+            extracted = extracted.replace("Feature:", "").strip()
+
+            # Remove quotes if wrapped
+            if extracted.startswith('"') and extracted.endswith('"'):
+                extracted = extracted[1:-1]
+
+            return extracted
+        except Exception as e:
+            print(f"Error extracting feedback: {e}")
+            # Fallback to first few sentences
+            sentences = email_body.split(".")[:3]
+            return ". ".join(s.strip() for s in sentences if s.strip()) + "."
+
+    def _extract_name(self, sender_email: str, email_body: str) -> str:
+        """Extract name from email sender address or email body."""
+        # Try to extract from email body signature first
+        lines = email_body.split("\n")
+        for line in reversed(lines[-5:]):  # Check last 5 lines
+            line = line.strip()
+            if line and not line.startswith(("Best", "Thanks", "Regards", "Sincerely", "-")):
+                # Simple check for name-like pattern
+                if len(line.split()) <= 3 and not "@" in line:
+                    return line
+
+        # Fallback to extracting from email address
+        name_part = sender_email.split("@")[0]
+        # Convert snake_case or camelCase to readable
+        name_part = name_part.replace(".", " ").replace("_", " ").replace("-", " ")
+        name_part = " ".join(word.capitalize() for word in name_part.split())
+
+        return name_part if name_part else "Customer"
+
     def save_feedback(self, state: SupportState) -> SupportState:
-        """Save feedback or feature requests to file for review."""
+        """Save feedback or feature requests to log file with extracted content."""
         from pathlib import Path
         from datetime import datetime
 
@@ -225,25 +268,20 @@ class SupportWorkflow:
         feedback_dir = Path("feedback_logs")
         feedback_dir.mkdir(exist_ok=True)
 
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = feedback_dir / f"{category}_{timestamp}.txt"
+        # Use single log file that gets appended to
+        log_file = feedback_dir / f"{category}_log.txt"
 
-        content = f"""
-        Category: {category.upper()}
-        Date: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
-        From: {email.sender}
-        Subject: {email.subject}
-        Priority: {state.get('priority', 'N/A')}
+        # Extract name and feedback
+        name = self._extract_name(email.sender, email.body)
+        feedback = self._extract_feedback(email.body, category)
+        date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        EMAIL CONTENT:
-        {email.body}
+        # Format log entry: Name, Date, Feedback
+        log_entry = f"{name} | {date} | {feedback}\n"
 
-        ---
-        Saved for review by {category.replace('_', ' ').title()} Team
-        """
-
-        filename.write_text(content.strip())
-        print(f"\n{category.replace('_', ' ').title()} saved to: {filename}")
+        # Append to log file
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(log_entry)
 
         email_data = {"sender": email.sender, "subject": email.subject, "body": email.body}
 
@@ -257,12 +295,9 @@ class SupportWorkflow:
         state["qa_approved"] = True
         state["qa_score"] = 10.0
         state["status"] = "completed_approved"
-
-        print("\n" + "─" * 70)
-        print("RESPONSE:")
-        print("─" * 70)
-        print(final_response)
-        print("─" * 70)
+        state["feedback_saved"] = True
+        state["feedback_file"] = str(log_file)
+        state["feedback_entry"] = f"{name} | {feedback[:100]}..."
 
         return state
 
@@ -287,17 +322,7 @@ class SupportWorkflow:
                 state["draft_response"] = final_response
                 state["qa_score"] = cached["qa_score"]
                 state["qa_approved"] = True
-
-                print("using cached response")
-                print(final_response)
-
                 return state
-
-        # Generate new response
-        if revision_count > 0:
-            print(f"\nGenerating revised response (attempt {revision_count + 1})...")
-        else:
-            print("\nGenerating response...")
 
         email_data = {"sender": email.sender, "subject": email.subject, "body": email.body}
 
@@ -310,28 +335,16 @@ class SupportWorkflow:
         )
 
         final_response = self.response_generator.add_signature(response)
-
         state["draft_response"] = final_response
-        print("Response generated")
-
-        # Show response preview
-        print("Respose")
-        print(final_response)
 
         return state
 
     def quality_check(self, state: SupportState) -> SupportState:
         """Perform quality assurance check."""
-        print("\nPerforming quality check...")
-
         email = state["email"]
         email_data = {"sender": email.sender, "subject": email.subject, "body": email.body}
 
         quick_result = self.qa_agent.quick_check(state["draft_response"])
-        if not quick_result["passed"]:
-            print("Quick check failed:")
-            for issue in quick_result["issues"]:
-                print(f"  - {issue}")
 
         # Full QA review
         qa_result = self.qa_agent.review(
@@ -346,14 +359,6 @@ class SupportWorkflow:
         state["qa_issues"] = qa_result.issues
         state["qa_suggestions"] = qa_result.suggestions
 
-        print(f"Quality Score: {qa_result.quality_score:.1f}/10")
-        print(f"Approved: {qa_result.approved}")
-
-        if not qa_result.approved and qa_result.issues:
-            print("Issues found:")
-            for issue in qa_result.issues[:3]:
-                print(f"  - {issue}")
-
         return state
 
     def finalize_response(self, state: SupportState) -> SupportState:
@@ -364,7 +369,6 @@ class SupportWorkflow:
         elif state.get("qa_approved", False):
             state["final_response"] = state["draft_response"]
             state["status"] = "completed_approved"
-            print("\nResponse approved and ready to send")
 
             # Cache the approved response for future use
             if self.use_cache and state.get("revision_count", 0) == 0:
@@ -383,8 +387,6 @@ class SupportWorkflow:
         else:
             state["final_response"] = state["draft_response"]
             state["status"] = "requires_manual_review"
-            print("\nResponse generated but requires manual review before sending")
-            print(f"Issues: {', '.join(state.get('qa_issues', ['Quality threshold not met']))}")
 
         return state
 
@@ -412,18 +414,8 @@ class SupportWorkflow:
 
         if revision_count < max_revisions:
             state["revision_count"] = revision_count + 1
-            print(
-                f"QA failed - Retrying (attempt {state['revision_count'] + 1}/{max_revisions + 1})..."
-            )
             return "revise"
         else:
-            # Skip retry, mark for manual review
-            if max_revisions == 0:
-                print("QA check failed - Marking for manual review (no retries enabled)")
-            else:
-                print(
-                    f"QA check failed after {max_revisions} revision(s) - Marking for manual review"
-                )
             return "reject"
 
     # Main execution
@@ -438,11 +430,6 @@ class SupportWorkflow:
         Returns:
             Final state after processing
         """
-        print("=" * 70)
-        print(f" Processing Email from {email.sender}")
-        print(f"   Subject: {email.subject}")
-        print("=" * 70)
-
         # Initialize state
         initial_state = SupportState(
             email=email,
@@ -469,7 +456,6 @@ class SupportWorkflow:
             final_state = self.graph.invoke(initial_state)
             return final_state
         except Exception as e:
-            print(f"\nError processing email: {e}")
             import traceback
 
             traceback.print_exc()

@@ -290,15 +290,21 @@ Write ONLY the email body (no signature):""",
                         response = "\n".join(lines[i:])
                         break
 
-        # Clean up extra whitespace
+        # Clean up extra whitespace and normalize indentation
         lines = response.split("\n")
         cleaned_lines = []
         for line in lines:
             stripped = line.strip()
-            if stripped:  # Keep non-empty lines
-                cleaned_lines.append(line)
+            if stripped:  # Keep non-empty lines, but remove leading whitespace
+                cleaned_lines.append(stripped)
+            elif cleaned_lines:  # Preserve single blank lines between paragraphs
+                if cleaned_lines[-1] != "":
+                    cleaned_lines.append("")
 
+        # Join lines and normalize paragraph spacing (single blank line between paragraphs)
         response = "\n".join(cleaned_lines)
+        # Normalize multiple blank lines to single blank line
+        response = re.sub(r"\n{3,}", "\n\n", response)
 
         return response.strip()
 
@@ -326,9 +332,8 @@ DO NOT include: [placeholders], notes, explanations, signature, or "please let m
         if any(sig in email_body for sig in signature_check):
             return email_body
 
-        signature = """
-        Thanks,
-        TaskFlow Pro Team
-        support@taskflowpro.com"""
+        # Ensure email body ends with newline, then add properly formatted signature
+        email_body = email_body.rstrip() + "\n\n"
+        signature = "Thanks,\nTaskFlow Pro Team\nsupport@taskflowpro.com"
 
         return email_body + signature
