@@ -26,6 +26,7 @@ logging.getLogger("chromadb.telemetry.product.posthog").setLevel(logging.CRITICA
 from utils.config import validate_config, GMAIL_EMAIL, CHECK_INTERVAL_SECONDS
 from utils.email_handler import GmailHandler, MockEmailHandler
 from workflows.support_workflow import SupportWorkflow
+from utils.metrics import get_tracker, EmailMetrics
 
 
 def print_banner():
@@ -35,68 +36,74 @@ def print_banner():
     print(f"Check interval: {CHECK_INTERVAL_SECONDS} seconds")
 
 
-def print_email_details(email):
-    """Print original email details."""
+def print_email_details(email, result, processing_time):
+    """Print detailed email processing information."""
     print("\n" + "=" * 70)
-    print("ORIGINAL EMAIL")
+    print("EMAIL")
     print("=" * 70)
-    print(f"From:     {email.sender}")
-    print(f"Subject:  {email.subject}")
-    print("=" * 70)
-
-
-def print_response(state: dict):
-    """Print generated response."""
-    response = state.get("final_response") or state.get("draft_response")
+    print(f"From: {email.sender}")
+    print(f"Subject: {email.subject}")
+    if email.body:
+        print(f"\nBody:\n{email.body[:500]}{'...' if len(email.body) > 500 else ''}")
+    print(f"\nCategory: {result.get('category', 'unknown')} | Priority: {result.get('priority', 'unknown')}")
+    
+    # Enhanced queries
+    if result.get('enhanced_queries'):
+        print("\n" + "-" * 70)
+        print("ENHANCED QUERIES")
+        print("-" * 70)
+        for query_type, queries in result['enhanced_queries'].items():
+            if queries.get('enhanced'):
+                print(f"\n{query_type.upper()}:")
+                print(f"  Original: {queries.get('original', 'N/A')}")
+                print(f"  Enhanced: {queries.get('enhanced', 'N/A')}")
+    
+    # Response
+    response = result.get("final_response") or result.get("draft_response")
     if response:
-        print("\n" + "=" * 70)
+        print("\n" + "-" * 70)
         print("RESPONSE")
-        print("=" * 70)
+        print("-" * 70)
         print(response)
-        print("=" * 70)
-
-
-def print_qa_results(state: dict):
-    """Print QA results."""
-    print("\n" + "=" * 70)
-    print("QA RESULTS")
-    print("=" * 70)
-    print(f"Quality Score: {state.get('qa_score', 0):.1f}/10")
-    print(f"Approved:      {'Yes' if state.get('qa_approved') else 'No'}")
-
-    if state.get("qa_issues"):
-        print(f"\nIssues:")
-        for issue in state["qa_issues"][:3]:
-            print(f"  - {issue}")
-    print("=" * 70)
-
-
-def print_final_status(state: dict):
-    """Print final status."""
-    print("\n" + "=" * 70)
-    print("FINAL STATUS")
-    print("=" * 70)
-
-    status = state["status"]
-
-    if status == "completed_skipped":
-        print(f"SKIPPED - Category: {state.get('category', 'unrelated').upper()}")
-    elif status == "error":
-        print(f"ERROR - {state.get('error_message', 'Unknown error')}")
-    elif status == "completed_approved":
-        if state.get("feedback_saved"):
-            category = state.get("category", "").replace("_", " ").title()
-            print(f"ADDED TO FEEDBACK LOG - {category}")
-            if state.get("feedback_file"):
-                print(f"  Log file: {state['feedback_file']}")
+    
+    # QA Results
+    qa_score = result.get('qa_score', 0)
+    if qa_score > 0:
+        print("\n" + "-" * 70)
+        print("QA ASSESSMENT")
+        print("-" * 70)
+        print(f"Score: {qa_score:.1f}/10")
+        print(f"Approved: {'Yes' if result.get('qa_approved') else 'No'}")
+        
+        if result.get("qa_issues"):
+            print("\nIssues Found:")
+            for issue in result["qa_issues"]:
+                print(f"  - {issue}")
+        
+        if result.get("qa_suggestions"):
+            print("\nSuggestions:")
+            for suggestion in result["qa_suggestions"]:
+                print(f"  - {suggestion}")
+    
+    # Final Status
+    print("\n" + "-" * 70)
+    print("STATUS")
+    print("-" * 70)
+    status = result.get("status", "unknown")
+    if status == "completed_approved":
+        if result.get("feedback_saved"):
+            print("Feedback Logged")
         else:
-            print("SENT - Email response sent to customer")
+            print("Email Sent")
     elif status == "requires_manual_review":
-        print("NEEDS MANUAL REVIEW - QA check did not pass")
+        print("Needs Review")
+    elif status == "completed_skipped":
+        print("Skipped")
     else:
-        print(f"Status: {status}")
-
-    print("=" * 70 + "\n")
+        print(status)
+    
+    print(f"Processing Time: {processing_time:.2f}s")
+    print("=" * 70)
 
 
 def detect_escalation(response_text: str) -> bool:
@@ -144,19 +151,32 @@ def detect_escalation(response_text: str) -> bool:
 
 def process_and_respond(workflow: SupportWorkflow, email_handler: GmailHandler, email):
     """Process an email and send response if approved."""
-
-    print_email_details(email)
-
+    start_time = time.time()
+    
+    # Process email
     result = workflow.process_email(email)
-
-    if result.get("final_response"):
-        print_response(result)
-
-    if result.get("qa_score", 0) > 0:
-        print_qa_results(result)
-
-    print_final_status(result)
-
+    processing_time = time.time() - start_time
+    
+    # Create metrics
+    metrics = EmailMetrics(
+        email_id=email.id,
+        category=result.get("category", "unknown"),
+        priority=result.get("priority", "unknown"),
+        total_time=processing_time,
+        qa_score=result.get("qa_score", 0),
+        qa_approved=result.get("qa_approved", False),
+        revision_count=result.get("revision_count", 0),
+        docs_retrieved=len(result.get("rag_sources", [])),
+        status=result.get("status", "unknown")
+    )
+    
+    # Track metrics
+    get_tracker().add_email_metrics(metrics)
+    
+    # Print details
+    print_email_details(email, result, processing_time)
+    
+    # Handle based on status
     if result["status"] == "completed_skipped":
         email_handler.mark_as_read(email.id)
         return
@@ -165,30 +185,20 @@ def process_and_respond(workflow: SupportWorkflow, email_handler: GmailHandler, 
         return
 
     if result["status"] == "requires_manual_review":
-        print("EMAIL REQUIRES MANUAL REVIEW - Applying label")
         if hasattr(email_handler, "add_label"):
-            success = email_handler.add_label(email.id, "NEEDS_REVIEW")
-        else:
-            print(f"Email handler does not support label functionality")
-        # DO NOT mark as read - keep it unread for visibility
+            email_handler.add_label(email.id, "NEEDS_REVIEW")
         return
 
     if result["status"] == "completed_approved" and result.get("final_response"):
         final_response = result["final_response"]
-
-        # Check if response contains escalation
         is_escalation = detect_escalation(final_response)
 
         if not result.get("feedback_saved"):
             email_handler.send_reply(email=email, reply_body=final_response)
 
-        # If escalation detected, label for review (but still mark as read since sent)
         if is_escalation:
-            print("\nESCALATION DETECTED - Applying NEEDS_REVIEW label for follow-up tracking")
             if hasattr(email_handler, "add_label"):
                 email_handler.add_label(email.id, "NEEDS_REVIEW")
-                # Keep unread so it's visible in labeled emails
-                print("Email kept unread for review tracking\n")
             else:
                 email_handler.mark_as_read(email.id)
         else:
@@ -222,8 +232,12 @@ def run_continuous_monitoring(workflow: SupportWorkflow, email_handler: GmailHan
             time.sleep(CHECK_INTERVAL_SECONDS)
 
     except KeyboardInterrupt:
-        print("Stopping email monitoring...")
+        print("\n\nStopping email monitoring...")
         print(f"Total emails processed: {processed_count}")
+        
+        # Show metrics summary
+        get_tracker().print_summary()
+        
         print("Goodbye\n")
 
 
@@ -240,15 +254,14 @@ def run_batch_processing(workflow: SupportWorkflow, email_handler: GmailHandler)
     print(f"Found {len(emails)} email(s) to process\n")
 
     for i, email in enumerate(emails, 1):
-        print(f"Processing Email {i}/{len(emails)}")
-
+        print(f"\n[{i}/{len(emails)}]")
         process_and_respond(workflow, email_handler, email)
 
         if i < len(emails):
-            time.sleep(2)
+            time.sleep(1)
 
-    print("Batch processing complete")
-    print(f"Processed {len(emails)} email(s)")
+    # Show metrics summary
+    get_tracker().print_summary()
 
 
 def main():

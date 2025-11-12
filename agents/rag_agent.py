@@ -36,8 +36,6 @@ class RAGAgent:
         self.use_query_enhancement = use_query_enhancement
         self.use_hybrid_search = use_hybrid_search
         
-        print("Initializing RAG Agent...")
-        
         # LLM for answer synthesis
         self.llm = load_llm(temperature=0.7, max_tokens=256)
         
@@ -45,7 +43,6 @@ class RAGAgent:
         self.vector_store = VectorStoreManager()
         try:
             self.vector_store.initialize()
-            print("Vector store loaded")
         except FileNotFoundError as e:
             print(f"Warning: {e}")
             print("Please run setup_vectorstore.py first")
@@ -55,12 +52,9 @@ class RAGAgent:
         if use_reranking:
             try:
                 from sentence_transformers import CrossEncoder
-                print("Loading reranker model (one-time download ~80MB)...")
                 self.reranker = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
-                print("Reranker loaded")
             except ImportError:
                 print("Warning: sentence-transformers not found. Reranking disabled.")
-                print("Install with: pip install sentence-transformers")
                 self.use_reranking = False
             except Exception as e:
                 print(f"Warning: Could not load reranker: {e}")
@@ -131,7 +125,6 @@ Return ONLY the rewritten question (one sentence):"""
             else:
                 return query
         except Exception as e:
-            print(f"  Query enhancement failed: {e}")
             return query  # Fallback to original
     
     def retrieve_context(
@@ -166,11 +159,11 @@ Return ONLY the rewritten question (one sentence):"""
         
         # Step 1: Enhance query
         enhanced_query = query
+        query_info = {"original": query, "enhanced": None}
         if do_enhance:
             enhanced_query = self.enhance_query(query, email_subject)
             if enhanced_query != query:
-                print(f"  Original: {query[:60]}...")
-                print(f"  Enhanced: {enhanced_query[:60]}...")
+                query_info["enhanced"] = enhanced_query
         
         # Step 2: Apply metadata filtering if category provided
         filter_dict = None
@@ -184,14 +177,12 @@ Return ONLY the rewritten question (one sentence):"""
             }
             doc_category = category_map.get(category, category)
             filter_dict = {"category": doc_category}
-            print(f"  Filtering by category: {doc_category}")
         
         # Step 3: Retrieve documents (hybrid or semantic)
         initial_k = k * 3 if do_rerank and self.reranker else k
         
         try:
             if do_hybrid and hasattr(self.vector_store, 'hybrid_search'):
-                print(f"  Using hybrid search (semantic + keyword)")
                 results = self.vector_store.hybrid_search(
                     enhanced_query,
                     k=initial_k,
@@ -204,7 +195,6 @@ Return ONLY the rewritten question (one sentence):"""
                     k=initial_k
                 )
         except Exception as e:
-            print(f"  Retrieval error: {e}")
             return []
         
         if not results:
@@ -212,7 +202,6 @@ Return ONLY the rewritten question (one sentence):"""
         
         # Step 4: Rerank if enabled
         if do_rerank and self.reranker and len(results) > k:
-            print(f"  Reranking {len(results)} → {k} documents...")
             results = self._rerank_results(enhanced_query, results, k)
         
         # Step 5: Format results
@@ -223,6 +212,7 @@ Return ONLY the rewritten question (one sentence):"""
                 "source": doc.metadata.get("source", "Unknown"),
                 "category": doc.metadata.get("category", "unknown"),
                 "score": float(score),
+                "query_info": query_info,
             })
         
         return retrieved_docs
@@ -255,7 +245,6 @@ Return ONLY the rewritten question (one sentence):"""
         try:
             rerank_scores = self.reranker.predict(pairs)
         except Exception as e:
-            print(f"  Reranking failed: {e}, using original order")
             return results[:k]
         
         # Combine documents with rerank scores and sort

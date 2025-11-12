@@ -32,6 +32,7 @@ class SupportState(TypedDict):
     # RAG results
     rag_context: str
     rag_sources: list
+    enhanced_queries: dict
 
     # Response generation
     draft_response: str
@@ -66,7 +67,7 @@ class SupportWorkflow:
         self.use_parallel = use_parallel
         self.use_cache = use_cache
 
-        print("Initializing agents...")
+        print("Initializing system...")
         self.classifier = EmailClassifierAgent()
         self.rag_agent = RAGAgent(
             use_reranking=True,
@@ -75,16 +76,15 @@ class SupportWorkflow:
         )
         self.response_generator = ResponseGeneratorAgent()
         self.qa_agent = QAAgent()
-        print("All agents initialized\n")
 
         if use_parallel:
             self.parallel_executor = ParallelExecutor(max_workers=2)
-            print("Parallel processing enabled\n")
 
         if use_cache:
             self.response_cache = ResponseCache()
             self.response_cache.clear_expired()
-            print("Response caching enabled\n")
+        
+        print("System ready\n")
 
         # Build the workflow graph
         self.graph = self._build_graph()
@@ -161,6 +161,9 @@ class SupportWorkflow:
         """Retrieve relevant context using RAG with metadata filtering."""
         email = state["email"]
         category = state["category"]
+        
+        # Track enhanced queries
+        enhanced_queries = {}
 
         # For product inquiries, use RAG heavily
         if category == "product_inquiry":
@@ -171,6 +174,10 @@ class SupportWorkflow:
             )
             state["rag_context"] = result["answer"]
             state["rag_sources"] = result.get("sources", [])
+            
+            # Extract query info from sources
+            if result.get("sources"):
+                enhanced_queries["body"] = result["sources"][0].get("query_info", {})
         else:
             # Use parallel retrieval for subject and body separately (faster)
             if self.use_parallel:
@@ -178,15 +185,22 @@ class SupportWorkflow:
                     {
                         "func": self.rag_agent.retrieve_context,
                         "args": (email.subject,),
-                        "kwargs": {"k": 1, "category": category},
+                        "kwargs": {"k": 1, "category": category, "email_subject": email.subject},
                     },
                     {
                         "func": self.rag_agent.retrieve_context,
                         "args": (email.body,),
-                        "kwargs": {"k": 1, "category": category},
+                        "kwargs": {"k": 1, "category": category, "email_subject": email.subject},
                     },
                 ]
                 results = self.parallel_executor.run_parallel(tasks)
+                
+                # Extract query info
+                if results[0]:
+                    enhanced_queries["subject"] = results[0][0].get("query_info", {})
+                if results[1]:
+                    enhanced_queries["body"] = results[1][0].get("query_info", {})
+                
                 # Combine results
                 docs = results[0] + results[1]
                 # Remove duplicates by content
@@ -201,8 +215,13 @@ class SupportWorkflow:
                 docs = self.rag_agent.retrieve_context(
                     email.subject + " " + email.body,
                     k=2,
-                    category=category
+                    category=category,
+                    email_subject=email.subject
                 )
+                
+                # Extract query info
+                if docs:
+                    enhanced_queries["combined"] = docs[0].get("query_info", {})
 
             if docs:
                 context = "\n\n".join([doc["content"] for doc in docs])
@@ -211,6 +230,9 @@ class SupportWorkflow:
             else:
                 state["rag_context"] = ""
                 state["rag_sources"] = []
+        
+        # Store enhanced queries in state
+        state["enhanced_queries"] = enhanced_queries
 
         return state
 
