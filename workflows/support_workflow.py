@@ -71,6 +71,7 @@ class SupportWorkflow:
         self.rag_agent = RAGAgent(
             use_reranking=True,
             use_query_enhancement=True,
+            use_hybrid_search=True,
         )
         self.response_generator = ResponseGeneratorAgent()
         self.qa_agent = QAAgent()
@@ -157,13 +158,17 @@ class SupportWorkflow:
         return state
 
     def retrieve_context(self, state: SupportState) -> SupportState:
-        """Retrieve relevant context using RAG (optimized with parallel processing)."""
+        """Retrieve relevant context using RAG with metadata filtering."""
         email = state["email"]
         category = state["category"]
 
         # For product inquiries, use RAG heavily
         if category == "product_inquiry":
-            result = self.rag_agent.answer_question(email.body, return_sources=True)
+            result = self.rag_agent.answer_question(
+                email.body,
+                email_subject=email.subject,
+                return_sources=True
+            )
             state["rag_context"] = result["answer"]
             state["rag_sources"] = result.get("sources", [])
         else:
@@ -173,12 +178,12 @@ class SupportWorkflow:
                     {
                         "func": self.rag_agent.retrieve_context,
                         "args": (email.subject,),
-                        "kwargs": {"k": 1},
+                        "kwargs": {"k": 1, "category": category},
                     },
                     {
                         "func": self.rag_agent.retrieve_context,
                         "args": (email.body,),
-                        "kwargs": {"k": 1},
+                        "kwargs": {"k": 1, "category": category},
                     },
                 ]
                 results = self.parallel_executor.run_parallel(tasks)
@@ -193,7 +198,11 @@ class SupportWorkflow:
                         unique_docs.append(doc)
                 docs = unique_docs[:2]  # Keep top 2
             else:
-                docs = self.rag_agent.retrieve_context(email.subject + " " + email.body, k=2)
+                docs = self.rag_agent.retrieve_context(
+                    email.subject + " " + email.body,
+                    k=2,
+                    category=category
+                )
 
             if docs:
                 context = "\n\n".join([doc["content"] for doc in docs])

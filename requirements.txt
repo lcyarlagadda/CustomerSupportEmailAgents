@@ -17,6 +17,7 @@ bitsandbytes==0.44.1  # For INT8 quantization (2-3x speedup)
 # Vector Store and Local Embeddings
 chromadb==0.5.20
 sentence-transformers==3.3.1
+rank-bm25==0.2.2  # For hybrid search
 
 # Document Processing
 pypdf==5.1.0

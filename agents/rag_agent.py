@@ -18,16 +18,23 @@ from utils.unified_llm_loader import load_llm
 class RAGAgent:
     """RAG agent with reranking and query enhancement."""
     
-    def __init__(self, use_reranking: bool = True, use_query_enhancement: bool = True):
+    def __init__(
+        self,
+        use_reranking: bool = True,
+        use_query_enhancement: bool = True,
+        use_hybrid_search: bool = True
+    ):
         """
         Initialize RAG agent.
         
         Args:
             use_reranking: Enable cross-encoder reranking (recommended)
             use_query_enhancement: Enable LLM query enhancement (recommended)
+            use_hybrid_search: Enable hybrid semantic + keyword search (recommended)
         """
         self.use_reranking = use_reranking
         self.use_query_enhancement = use_query_enhancement
+        self.use_hybrid_search = use_hybrid_search
         
         print("Initializing RAG Agent...")
         
@@ -132,18 +139,22 @@ Return ONLY the rewritten question (one sentence):"""
         query: str,
         k: int = TOP_K_RESULTS,
         email_subject: str = "",
+        category: str = None,
         use_enhancement: bool = None,
-        use_reranking: bool = None
+        use_reranking: bool = None,
+        use_hybrid: bool = None
     ) -> List[Dict[str, Any]]:
         """
-        Retrieve relevant documentation with enhancements.
+        Retrieve relevant documentation with all enhancements.
         
         Args:
             query: Search query
             k: Number of documents to return
             email_subject: Email subject for context
+            category: Filter by document category (billing, technical, etc.)
             use_enhancement: Override instance setting for query enhancement
             use_reranking: Override instance setting for reranking
+            use_hybrid: Override instance setting for hybrid search
             
         Returns:
             List of relevant document dictionaries
@@ -151,6 +162,7 @@ Return ONLY the rewritten question (one sentence):"""
         # Allow per-call overrides
         do_enhance = use_enhancement if use_enhancement is not None else self.use_query_enhancement
         do_rerank = use_reranking if use_reranking is not None else self.use_reranking
+        do_hybrid = use_hybrid if use_hybrid is not None else self.use_hybrid_search
         
         # Step 1: Enhance query
         enhanced_query = query
@@ -160,11 +172,37 @@ Return ONLY the rewritten question (one sentence):"""
                 print(f"  Original: {query[:60]}...")
                 print(f"  Enhanced: {enhanced_query[:60]}...")
         
-        # Step 2: Retrieve documents (get more for reranking)
+        # Step 2: Apply metadata filtering if category provided
+        filter_dict = None
+        if category:
+            # Map email categories to doc categories
+            category_map = {
+                "technical_support": "technical",
+                "product_inquiry": "general",
+                "billing": "billing",
+                "integration": "integration",
+            }
+            doc_category = category_map.get(category, category)
+            filter_dict = {"category": doc_category}
+            print(f"  Filtering by category: {doc_category}")
+        
+        # Step 3: Retrieve documents (hybrid or semantic)
         initial_k = k * 3 if do_rerank and self.reranker else k
         
         try:
-            results = self.vector_store.similarity_search_with_score(enhanced_query, k=initial_k)
+            if do_hybrid and hasattr(self.vector_store, 'hybrid_search'):
+                print(f"  Using hybrid search (semantic + keyword)")
+                results = self.vector_store.hybrid_search(
+                    enhanced_query,
+                    k=initial_k,
+                    alpha=0.7,  # 70% semantic, 30% keyword
+                    filter_dict=filter_dict
+                )
+            else:
+                results = self.vector_store.similarity_search_with_score(
+                    enhanced_query,
+                    k=initial_k
+                )
         except Exception as e:
             print(f"  Retrieval error: {e}")
             return []
@@ -172,17 +210,18 @@ Return ONLY the rewritten question (one sentence):"""
         if not results:
             return []
         
-        # Step 3: Rerank if enabled
+        # Step 4: Rerank if enabled
         if do_rerank and self.reranker and len(results) > k:
             print(f"  Reranking {len(results)} → {k} documents...")
             results = self._rerank_results(enhanced_query, results, k)
         
-        # Step 4: Format results
+        # Step 5: Format results
         retrieved_docs = []
         for doc, score in results[:k]:
             retrieved_docs.append({
                 "content": doc.page_content,
                 "source": doc.metadata.get("source", "Unknown"),
+                "category": doc.metadata.get("category", "unknown"),
                 "score": float(score),
             })
         
