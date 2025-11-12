@@ -114,7 +114,7 @@ class ResponseCache:
         if key in self.cache:
             entry = self.cache[key]
             if not self._is_expired(entry["timestamp"]):
-                print(f"✓ Cache hit (exact match)")
+                print(f"Cache hit (exact match)")
                 entry["cache_hit_type"] = "exact"
                 return entry
             else:
@@ -174,7 +174,7 @@ class ResponseCache:
         }
 
         self._save_cache()
-        print(f"✓ Response cached (key: {key[:8]}...)")
+        print(f"Response cached (key: {key[:8]}...)")
 
     def clear_expired(self):
         """Remove all expired entries from cache."""

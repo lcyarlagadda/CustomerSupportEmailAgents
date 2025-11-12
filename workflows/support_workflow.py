@@ -68,7 +68,10 @@ class SupportWorkflow:
 
         print("Initializing agents...")
         self.classifier = EmailClassifierAgent()
-        self.rag_agent = RAGAgent()
+        self.rag_agent = RAGAgent(
+            use_reranking=True,
+            use_query_enhancement=True,
+        )
         self.response_generator = ResponseGeneratorAgent()
         self.qa_agent = QAAgent()
         print("All agents initialized\n")

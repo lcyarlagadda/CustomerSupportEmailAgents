@@ -22,7 +22,11 @@ USE_GPU = os.getenv("USE_GPU", "auto")
 LLM_TEMPERATURE = 0.7
 
 # Embedding Configuration
-EMBEDDING_MODEL = "all-MiniLM-L6-v2"
+# Options:
+# - "all-MiniLM-L6-v2" (default, 384 dim, fast, good)
+# - "BAAI/bge-small-en-v1.5" (384 dim, faster, better accuracy +15%)
+# - "BAAI/bge-base-en-v1.5" (768 dim, slower, best accuracy +25%)
+EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"  # Upgraded for better accuracy
 
 # Vector Store Configuration
 VECTOR_DB_NAME = "taskflow_support_db"
