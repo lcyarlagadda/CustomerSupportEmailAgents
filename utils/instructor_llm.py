@@ -8,7 +8,8 @@ instead of raw text, ensuring type safety and validation.
 import instructor
 from typing import Type, TypeVar, Optional
 from pydantic import BaseModel
-from utils.groq_loader import load_groq_llm, get_groq_api_key
+from groq import Groq
+from utils.groq_loader import get_groq_api_key
 from utils.config import GROQ_MODEL, LLM_TEMPERATURE
 
 T = TypeVar('T', bound=BaseModel)
@@ -42,13 +43,14 @@ def get_instructor_client(
     if cache_key in _instructor_cache:
         return _instructor_cache[cache_key]
     
-    # Get base Groq LLM
-    base_llm = load_groq_llm(model_name=model_name, temperature=temp, max_tokens=max_tokens)
+    # Create raw Groq client (not LangChain wrapper)
+    api_key = get_groq_api_key()
+    base_client = Groq(api_key=api_key)
     
     # Wrap with instructor for structured outputs
     # Instructor automatically handles JSON mode and validation
     client = instructor.from_groq(
-        base_llm,
+        base_client,
         mode=instructor.Mode.JSON
     )
     

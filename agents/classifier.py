@@ -121,12 +121,12 @@ DO NOT return the JSON schema. Return actual values."""
 
         except json.JSONDecodeError as e:
             print(f"Error parsing classification JSON: {e}")
-            print(f"Response preview: {response[:200]}...")
             return self._fallback_classification(email_data)
 
         except Exception as e:
             print(f"Error creating classification: {e}")
-            print(f"Response type: {type(response)}")
+            import traceback
+            traceback.print_exc()
             return self._fallback_classification(email_data)
 
     def _fallback_classification(self, email_data: Dict[str, Any]) -> EmailClassification:
