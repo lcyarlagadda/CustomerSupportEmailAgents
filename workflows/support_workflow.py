@@ -7,14 +7,12 @@ import concurrent.futures
 from langgraph.graph import StateGraph, END
 
 from agents.classifier import EmailClassifierAgent
-from agents.rag_agent import RAGAgent
-from agents.response_generator import ResponseGeneratorAgent
+from agents.response_agent import ResponseAgent
 from agents.qa_agent import QAAgent
 from utils.email_handler import Email
 from utils.parallel_utils import ParallelExecutor
 from utils.response_cache import ResponseCache
 from utils.unified_llm_loader import load_llm
-from utils.guardrails_manager import get_guardrails_manager
 
 
 # Define the state schema
@@ -39,22 +37,19 @@ class SupportState(TypedDict):
     draft_response: str
     final_response: str
 
-    # QA results
+    # QA results (includes integrated safety checks)
     qa_approved: bool
     qa_score: float
     qa_issues: list
     qa_suggestions: list
+    safety_violations: list
+    response_redacted: bool
 
     # Workflow control
     revision_count: int
     max_revisions: int
     status: str
     error_message: str
-    
-    # Guardrails results
-    guardrail_violations: list
-    guardrail_warnings: list
-    response_redacted: bool
 
 
 class SupportWorkflow:
@@ -75,12 +70,11 @@ class SupportWorkflow:
 
         print("Initializing system...")
         self.classifier = EmailClassifierAgent()
-        self.rag_agent = RAGAgent(
+        self.response_agent = ResponseAgent(
             use_reranking=True,
             use_query_enhancement=True,
             use_hybrid_search=True,
         )
-        self.response_generator = ResponseGeneratorAgent()
         self.qa_agent = QAAgent()
 
         if use_parallel:
@@ -106,7 +100,6 @@ class SupportWorkflow:
         workflow.add_node("save_feedback", self.save_feedback)
         workflow.add_node("retrieve_context", self.retrieve_context)
         workflow.add_node("generate_response", self.generate_response)
-        workflow.add_node("validate_safety", self.validate_response_safety)
         workflow.add_node("quality_check", self.quality_check)
         workflow.add_node("finalize", self.finalize_response)
 
@@ -124,16 +117,9 @@ class SupportWorkflow:
         workflow.add_edge("save_feedback", "finalize")
 
         workflow.add_edge("retrieve_context", "generate_response")
-        workflow.add_edge("generate_response", "validate_safety")
-        
-        # Conditional edge: if safety check passes, go to QA, otherwise finalize
-        workflow.add_conditional_edges(
-            "validate_safety",
-            self.route_after_safety_check,
-            {"safe": "quality_check", "blocked": "finalize"},
-        )
+        workflow.add_edge("generate_response", "quality_check")
 
-        # Conditional edge: approve or revise
+        # Conditional edge: approve or revise (QA now includes safety checks)
         workflow.add_conditional_edges(
             "quality_check",
             self.route_after_qa,
@@ -160,9 +146,8 @@ class SupportWorkflow:
         state["revision_count"] = 0
         state["max_revisions"] = self.max_revisions
         
-        # Initialize guardrails fields
-        state["guardrail_violations"] = []
-        state["guardrail_warnings"] = []
+        # Initialize safety fields
+        state["safety_violations"] = []
         state["response_redacted"] = False
 
         return state
@@ -186,28 +171,25 @@ class SupportWorkflow:
 
         # For product inquiries, use RAG heavily
         if category == "product_inquiry":
-            result = self.rag_agent.answer_question(
-                email.body,
-                email_subject=email.subject,
-                return_sources=True
+            # Quick answer for feedback/feature requests (no retrieval needed)
+            response_result = self.response_agent.generate_response(
+                email_data={"sender": email.sender, "subject": email.subject, "body": email.body},
+                category=category,
+                context=None
             )
-            state["rag_context"] = result["answer"]
-            state["rag_sources"] = result.get("sources", [])
-            
-            # Extract query info from sources
-            if result.get("sources"):
-                enhanced_queries["body"] = result["sources"][0].get("query_info", {})
+            state["rag_context"] = response_result
+            state["rag_sources"] = []
         else:
             # Use parallel retrieval for subject and body separately (faster)
             if self.use_parallel:
                 tasks = [
                     {
-                        "func": self.rag_agent.retrieve_context,
+                        "func": self.response_agent.retrieve_context,
                         "args": (email.subject,),
                         "kwargs": {"k": 1, "category": category, "email_subject": email.subject},
                     },
                     {
-                        "func": self.rag_agent.retrieve_context,
+                        "func": self.response_agent.retrieve_context,
                         "args": (email.body,),
                         "kwargs": {"k": 1, "category": category, "email_subject": email.subject},
                     },
@@ -231,7 +213,7 @@ class SupportWorkflow:
                         unique_docs.append(doc)
                 docs = unique_docs[:2]  # Keep top 2
             else:
-                docs = self.rag_agent.retrieve_context(
+                docs = self.response_agent.retrieve_context(
                     email.subject + " " + email.body,
                     k=2,
                     category=category,
@@ -338,11 +320,11 @@ Extracted feedback/feature:"""
 
         email_data = {"sender": email.sender, "subject": email.subject, "body": email.body}
 
-        response = self.response_generator.generate_response(
+        response = self.response_agent.generate_response(
             email_data=email_data, category=category, context=None
         )
 
-        final_response = self.response_generator.add_signature(response)
+        final_response = self.response_agent.add_signature(response)
         state["draft_response"] = final_response
         state["final_response"] = final_response
         state["qa_approved"] = True
@@ -383,70 +365,49 @@ Extracted feedback/feature:"""
         context = state.get("rag_context", None)
 
         # Generate response
-        response = self.response_generator.generate_response(
+        response = self.response_agent.generate_response(
             email_data=email_data, category=category, context=context
         )
 
-        final_response = self.response_generator.add_signature(response)
+        final_response = self.response_agent.add_signature(response)
         state["draft_response"] = final_response
 
         return state
-    
-    def validate_response_safety(self, state: SupportState) -> SupportState:
-        """Validate response for safety issues using guardrails."""
-        guardrails = get_guardrails_manager()
-        
-        response = state.get("draft_response", "")
-        email = state["email"]
-        category = state.get("category", "")
-        
-        # Validate response
-        validation_result = guardrails.validate_response(
-            response_text=response,
-            email_context=email.body,
-            category=category
-        )
-        
-        # Store results in state
-        state["guardrail_violations"] = validation_result["violations"]
-        state["response_redacted"] = validation_result.get("redacted_response") is not None
-        
-        # If response needs to be redacted, use the redacted version
-        if validation_result.get("redacted_response"):
-            state["draft_response"] = validation_result["redacted_response"]
-        
-        # If response should be blocked, flag for manual review
-        if validation_result["should_block"]:
-            state["status"] = "requires_manual_review"
-            state["error_message"] = "Response blocked by safety guardrails"
-            
-            # Add violation details to QA issues
-            violation_messages = [v.message for v in validation_result["violations"]]
-            state["qa_issues"] = violation_messages
-            state["qa_approved"] = False
-            state["qa_score"] = 0.0
-        
-        return state
 
     def quality_check(self, state: SupportState) -> SupportState:
-        """Perform quality assurance check."""
+        """Perform comprehensive quality and safety check."""
         email = state["email"]
         email_data = {"sender": email.sender, "subject": email.subject, "body": email.body}
 
         quick_result = self.qa_agent.quick_check(state["draft_response"])
 
-        # Full QA review
-        qa_result = self.qa_agent.review(
+        # Full QA review with integrated safety checks
+        qa_result, redacted_response = self.qa_agent.review(
             original_email=email_data,
             generated_response=state["draft_response"],
             category=state["category"],
             priority=state["priority"],
         )
 
+        # Store QA results
         state["qa_approved"] = qa_result.approved
         state["qa_score"] = qa_result.quality_score
         state["qa_issues"] = qa_result.issues
         state["qa_suggestions"] = qa_result.suggestions
+        
+        # Store safety results (integrated from guardrails)
+        state["safety_violations"] = qa_result.safety_violations
+        state["response_redacted"] = qa_result.requires_redaction
+        
+        # If response was redacted, use the redacted version
+        if redacted_response:
+            state["draft_response"] = redacted_response
+        
+        # If response should be blocked, flag for manual review
+        if qa_result.should_block:
+            state["status"] = "requires_manual_review"
+            state["error_message"] = "Response blocked by safety checks"
+            state["qa_approved"] = False
 
         return state
 
@@ -492,19 +453,6 @@ Extracted feedback/feature:"""
         else:
             return "skip"
     
-    def route_after_safety_check(self, state: SupportState) -> str:
-        """Route after safety validation."""
-        # If status was set to requires_manual_review by guardrails, block
-        if state.get("status") == "requires_manual_review":
-            return "blocked"
-        
-        # Check if there are critical violations
-        violations = state.get("guardrail_violations", [])
-        if any(v.severity == "critical" for v in violations):
-            return "blocked"
-        
-        # Otherwise proceed to QA
-        return "safe"
 
     def route_after_qa(self, state: SupportState) -> str:
         """Route after QA based on approval and revision count."""

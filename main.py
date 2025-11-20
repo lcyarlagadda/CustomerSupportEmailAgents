@@ -90,36 +90,11 @@ def print_email_details(email, result, processing_time):
         if result.get("response_redacted"):
             print("\n  Response was automatically redacted to remove sensitive information")
     
-    # Guardrails Check
-    guardrail_violations = result.get("guardrail_violations", [])
-    if guardrail_violations:
-        print(" SAFETY CHECKS")
-        
-        # Group by severity
-        critical = [v for v in guardrail_violations if v.severity == "critical"]
-        high = [v for v in guardrail_violations if v.severity == "high"]
-        medium = [v for v in guardrail_violations if v.severity == "medium"]
-        low = [v for v in guardrail_violations if v.severity == "low"]
-        
-        if critical:
-            print("\n CRITICAL Issues:")
-            for v in critical:
-                print(f"  - {v.check_type}: {v.message}")
-        
-        if high:
-            print("\n  HIGH Priority:")
-            for v in high:
-                print(f"  - {v.check_type}: {v.message}")
-        
-        if medium:
-            print("\n MEDIUM Priority:")
-            for v in medium:
-                print(f"  - {v.check_type}: {v.message}")
-        
-        if low:
-            print("\n  LOW Priority:")
-            for v in low:
-                print(f"  - {v.check_type}: {v.message}")
+    # Safety Checks (integrated into QA)
+    safety_violations = result.get("safety_violations", [])
+    if safety_violations:
+        for violation in safety_violations:
+            print(f"{violation}")
     
     # QA Results
     qa_score = result.get('qa_score', 0)
