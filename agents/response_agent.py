@@ -12,6 +12,8 @@ Replaces: RAGAgent + ResponseGeneratorAgent
 
 from typing import List, Dict, Any, Optional
 from langchain.schema import Document
+from collections import defaultdict
+import re
 
 from utils.config import TOP_K_RESULTS
 from utils.vector_store import VectorStoreManager
@@ -30,7 +32,10 @@ class ResponseAgent:
         self,
         use_reranking: bool = True,
         use_query_enhancement: bool = True,
-        use_hybrid_search: bool = True
+        use_hybrid_search: bool = True,
+        use_multi_query: bool = False,
+        use_query_decomposition: bool = False,
+        use_contextual_compression: bool = False
     ):
         """
         Initialize the unified response agent.
@@ -39,13 +44,22 @@ class ResponseAgent:
             use_reranking: Enable cross-encoder reranking (recommended)
             use_query_enhancement: Enable LLM query enhancement (recommended)
             use_hybrid_search: Enable hybrid semantic + keyword search (recommended)
+            use_multi_query: Enable multi-query retrieval for better recall (advanced)
+            use_query_decomposition: Break complex queries into sub-queries (advanced)
+            use_contextual_compression: Extract only relevant sentences (advanced)
         """
         self.use_reranking = use_reranking
         self.use_query_enhancement = use_query_enhancement
         self.use_hybrid_search = use_hybrid_search
+        self.use_multi_query = use_multi_query
+        self.use_query_decomposition = use_query_decomposition
+        self.use_contextual_compression = use_contextual_compression
         
         # LLM for response generation
         self.llm = load_llm(temperature=0.8, max_tokens=400)
+        
+        # LLM for advanced RAG techniques (query generation, decomposition)
+        self.llm_for_rag = load_llm(temperature=0.0, max_tokens=200) if (use_multi_query or use_query_decomposition) else None
         
         # Vector store for document retrieval
         self.vector_store = VectorStoreManager()
@@ -231,6 +245,191 @@ Return ONLY the rewritten question (one sentence):"""
         except Exception:
             return query
     
+    # ============================================================
+    # ADVANCED RAG TECHNIQUES
+    # ============================================================
+    
+    def generate_multi_queries(self, query: str, num_queries: int = 3) -> List[str]:
+        """
+        Generate multiple variations of a query for better recall.
+        
+        Different phrasings can retrieve different relevant documents.
+        
+        Args:
+            query: Original query
+            num_queries: Number of variations to generate
+            
+        Returns:
+            List of query variations including original
+        """
+        if not self.use_multi_query or not self.llm_for_rag or len(query.split()) < 3:
+            return [query]  # Skip for very short queries
+        
+        prompt = f"""Generate {num_queries} different ways to ask this question, each focusing on a different aspect:
+
+Original question: {query}
+
+Requirements:
+1. Keep questions concise (one sentence each)
+2. Focus on different keywords or phrasings
+3. Maintain the core intent
+4. Make them searchable
+
+Return ONLY the {num_queries} alternative questions, one per line:"""
+        
+        try:
+            response = self.llm_for_rag.invoke(prompt)
+            variations_text = response.content if hasattr(response, 'content') else str(response)
+            
+            # Parse variations
+            variations = [v.strip() for v in variations_text.split('\n') if v.strip() and len(v.strip()) > 10]
+            variations = [re.sub(r'^\d+[\.\)]\s*', '', v) for v in variations]  # Remove numbering
+            
+            # Add original and limit
+            all_queries = [query] + variations[:num_queries]
+            return all_queries[:num_queries + 1]
+            
+        except Exception:
+            return [query]  # Fallback to original
+    
+    def decompose_query(self, query: str) -> List[str]:
+        """
+        Decompose complex query into simpler sub-queries.
+        
+        Helps when query has multiple parts (e.g., "How do I X and also Y?")
+        
+        Args:
+            query: Complex query
+            
+        Returns:
+            List of sub-queries
+        """
+        if not self.use_query_decomposition or not self.llm_for_rag:
+            return [query]
+        
+        # Check if query is complex (has "and", multiple questions, etc.)
+        complexity_indicators = ['and', 'also', '?', 'but', 'however', 'additionally']
+        is_complex = any(indicator in query.lower() for indicator in complexity_indicators) and len(query.split()) > 10
+        
+        if not is_complex:
+            return [query]
+        
+        prompt = f"""Break this complex question into 2-3 simpler sub-questions:
+
+Question: {query}
+
+Return ONLY the sub-questions, one per line:"""
+        
+        try:
+            response = self.llm_for_rag.invoke(prompt)
+            sub_queries_text = response.content if hasattr(response, 'content') else str(response)
+            
+            # Parse sub-queries
+            sub_queries = [q.strip() for q in sub_queries_text.split('\n') if q.strip() and len(q.strip()) > 10]
+            sub_queries = [re.sub(r'^\d+[\.\)]\s*', '', q) for q in sub_queries]
+            
+            return sub_queries[:3] if sub_queries else [query]
+            
+        except Exception:
+            return [query]
+    
+    def reciprocal_rank_fusion(
+        self,
+        doc_lists: List[List[tuple]],
+        k: int = 60
+    ) -> List[tuple]:
+        """
+        Combine multiple ranked lists using Reciprocal Rank Fusion.
+        
+        RRF is more robust than weighted averaging and doesn't require
+        score normalization. Formula: RRF(d) = Σ 1/(k + rank(d))
+        
+        Args:
+            doc_lists: List of ranked document lists
+            k: Constant (usually 60)
+            
+        Returns:
+            Fused ranked list
+        """
+        # Calculate RRF scores
+        rrf_scores = defaultdict(float)
+        doc_map = {}  # Store document objects
+        
+        for doc_list in doc_lists:
+            for rank, (doc, score) in enumerate(doc_list, start=1):
+                # Use page_content as unique key
+                key = doc.page_content
+                rrf_scores[key] += 1.0 / (k + rank)
+                if key not in doc_map:
+                    doc_map[key] = doc
+        
+        # Sort by RRF score
+        sorted_docs = sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)
+        
+        # Convert back to (Document, score) format
+        result = [(doc_map[content], score) for content, score in sorted_docs]
+        
+        return result
+    
+    def compress_documents(
+        self,
+        query: str,
+        documents: List[Dict[str, Any]],
+        max_sentences_per_doc: int = 3
+    ) -> List[Dict[str, Any]]:
+        """
+        Extract only the most relevant sentences from each document.
+        
+        This reduces noise and focuses on information that actually
+        answers the query, improving response accuracy.
+        
+        Args:
+            query: The query to match against
+            documents: Retrieved documents
+            max_sentences_per_doc: Max sentences to keep per document
+            
+        Returns:
+            Compressed documents
+        """
+        if not self.use_contextual_compression or not documents:
+            return documents
+        
+        compressed = []
+        
+        for doc in documents:
+            content = doc["content"]
+            
+            # Split into sentences
+            sentences = re.split(r'(?<=[.!?])\s+', content)
+            
+            if len(sentences) <= max_sentences_per_doc:
+                compressed.append(doc)
+                continue
+            
+            # Score sentences by keyword overlap with query
+            query_words = set(query.lower().split())
+            sentence_scores = []
+            
+            for sent in sentences:
+                sent_words = set(sent.lower().split())
+                # Jaccard similarity
+                overlap = len(query_words & sent_words)
+                score = overlap / len(query_words) if query_words else 0
+                sentence_scores.append((sent, score))
+            
+            # Keep top sentences
+            top_sentences = sorted(sentence_scores, key=lambda x: x[1], reverse=True)[:max_sentences_per_doc]
+            # Re-sort by original order
+            top_sentences_ordered = [s for s in sentences if any(s == sent for sent, _ in top_sentences)]
+            
+            # Create compressed document
+            compressed_doc = doc.copy()
+            compressed_doc["content"] = " ".join(top_sentences_ordered[:max_sentences_per_doc])
+            compressed_doc["compressed"] = True
+            compressed.append(compressed_doc)
+        
+        return compressed
+    
     def retrieve_context(
         self,
         query: str,
@@ -239,7 +438,7 @@ Return ONLY the rewritten question (one sentence):"""
         category: str = None
     ) -> List[Dict[str, Any]]:
         """
-        Retrieve relevant documentation with enhancements.
+        Retrieve relevant documentation with optional advanced features.
         
         Args:
             query: Search query
@@ -250,6 +449,24 @@ Return ONLY the rewritten question (one sentence):"""
         Returns:
             List of relevant document dictionaries
         """
+        # Check if using advanced features (multi-query, decomposition, RRF)
+        using_advanced = self.use_multi_query or self.use_query_decomposition
+        
+        if not using_advanced:
+            # Use standard retrieval path (faster, simpler)
+            return self._standard_retrieval(query, k, email_subject, category)
+        else:
+            # Use advanced retrieval path (higher accuracy)
+            return self._advanced_retrieval(query, k, email_subject, category)
+    
+    def _standard_retrieval(
+        self,
+        query: str,
+        k: int,
+        email_subject: str = "",
+        category: str = None
+    ) -> List[Dict[str, Any]]:
+        """Standard retrieval without advanced features."""
         # Step 1: Enhance query
         enhanced_query = query
         query_info = {"original": query, "enhanced": None}
@@ -307,7 +524,98 @@ Return ONLY the rewritten question (one sentence):"""
                 "query_info": query_info,
             })
         
+        # Step 6: Apply compression if enabled
+        if self.use_contextual_compression:
+            retrieved_docs = self.compress_documents(query, retrieved_docs, max_sentences_per_doc=4)
+        
         return retrieved_docs
+    
+    def _advanced_retrieval(
+        self,
+        query: str,
+        k: int,
+        email_subject: str = "",
+        category: str = None
+    ) -> List[Dict[str, Any]]:
+        """Advanced retrieval with multi-query, decomposition, and RRF."""
+        # Step 1: Query decomposition (if complex)
+        sub_queries = self.decompose_query(query)
+        
+        all_doc_lists = []
+        
+        for sub_query in sub_queries:
+            # Step 2: Generate query variations
+            query_variations = self.generate_multi_queries(sub_query, num_queries=2)
+            
+            # Step 3: Retrieve for each variation
+            for variant in query_variations:
+                # Enhance query
+                enhanced = variant
+                if self.use_query_enhancement:
+                    enhanced = self.enhance_query(variant, email_subject)
+                
+                # Apply category filtering
+                filter_dict = None
+                if category:
+                    category_map = {
+                        "technical_support": "technical",
+                        "product_inquiry": "general",
+                        "billing": "billing",
+                        "integration": "integration",
+                    }
+                    doc_category = category_map.get(category, category)
+                    filter_dict = {"category": doc_category}
+                
+                # Retrieve
+                try:
+                    initial_k = k * 2  # Get more for fusion
+                    
+                    if self.use_hybrid_search and hasattr(self.vector_store, 'hybrid_search'):
+                        results = self.vector_store.hybrid_search(
+                            enhanced,
+                            k=initial_k,
+                            alpha=0.7,
+                            filter_dict=filter_dict
+                        )
+                    else:
+                        results = self.vector_store.similarity_search_with_score(
+                            enhanced,
+                            k=initial_k
+                        )
+                    
+                    if results:
+                        all_doc_lists.append(results)
+                        
+                except Exception:
+                    continue
+        
+        if not all_doc_lists:
+            return []
+        
+        # Step 4: Reciprocal Rank Fusion
+        fused_results = self.reciprocal_rank_fusion(all_doc_lists, k=60)
+        
+        # Step 5: Rerank if enabled
+        if self.use_reranking and self.reranker and len(fused_results) > k:
+            fused_results = self._rerank_results(query, fused_results, k * 2)
+        
+        # Step 6: Format results
+        retrieved_docs = []
+        for doc, score in fused_results[:k * 2]:
+            retrieved_docs.append({
+                "content": doc.page_content,
+                "source": doc.metadata.get("source", "Unknown"),
+                "category": doc.metadata.get("category", "unknown"),
+                "score": float(score),
+                "query_info": {"original": query, "enhanced": True},
+            })
+        
+        # Step 7: Contextual compression
+        if self.use_contextual_compression:
+            retrieved_docs = self.compress_documents(query, retrieved_docs, max_sentences_per_doc=4)
+        
+        # Return top-k after compression
+        return retrieved_docs[:k]
     
     def _rerank_results(
         self,

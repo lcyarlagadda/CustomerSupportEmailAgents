@@ -36,6 +36,10 @@ https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0
 tiktoken==0.8.0
 requests==2.32.3
 
+# Database (for billing/membership queries)
+# SQLite is built-in to Python, no installation needed
+redis==5.0.1  # Optional: For caching customer data (improves performance)
+
 # Gmail API (for production email integration)
 google-auth==2.35.0
 google-auth-oauthlib==1.2.1

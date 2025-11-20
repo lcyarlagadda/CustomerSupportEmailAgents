@@ -83,82 +83,70 @@ def print_banner():
 
 def print_email_details(email, result, processing_time):
     """Print detailed email processing information."""
-    print("\n" + "=" * 70)
-    print("EMAIL")
-    print("=" * 70)
+    print("\n" + "=" * 80)
+    print("INCOMING EMAIL")
+    print("=" * 80)
     print(f"From: {email.sender}")
     print(f"Subject: {email.subject}")
-    if email.body:
-        print(f"\nBody:\n{email.body[:500]}{'...' if len(email.body) > 500 else ''}")
-    print(f"\nCategory: {result.get('category', 'unknown')} | Priority: {result.get('priority', 'unknown')}")
+    print(f"Category: {result.get('category', 'unknown')} | Priority: {result.get('priority', 'unknown')}")
     
-    # Enhanced queries
-    if result.get('enhanced_queries'):
-        print("\n" + "-" * 70)
-        print("ENHANCED QUERIES")
-        print("-" * 70)
-        for query_type, queries in result['enhanced_queries'].items():
-            if queries.get('enhanced'):
-                print(f"\n{query_type.upper()}:")
-                print(f"  Original: {queries.get('original', 'N/A')}")
-                print(f"  Enhanced: {queries.get('enhanced', 'N/A')}")
+    if email.body:
+        print(f"\nCustomer Message:")
+        print("-" * 80)
+        # Show full email body (not truncated)
+        print(email.body)
+        print("-" * 80)
     
     # Response
     response = result.get("final_response") or result.get("draft_response")
     if response:
-        print("\n" + "-" * 70)
-        print("RESPONSE")
-        print("-" * 70)
+        print("\n" + "=" * 80)
+        print(" GENERATED RESPONSE")
+        print("=" * 80)
         print(response)
+        print("-" * 80)
         
         # Show if response was redacted
         if result.get("response_redacted"):
-            print("\n  Response was automatically redacted to remove sensitive information")
+            print("  Note: PII was automatically redacted from this response")
     
-    # Safety Checks (integrated into QA)
-    safety_violations = result.get("safety_violations", [])
-    if safety_violations:
-        for violation in safety_violations:
-            print(f"{violation}")
-    
-    # QA Results
+    # QA Results (compact)
     qa_score = result.get('qa_score', 0)
     if qa_score > 0:
-        print("\n" + "-" * 70)
-        print("QA ASSESSMENT")
-        print("-" * 70)
-        print(f"Score: {qa_score:.1f}/10")
-        print(f"Approved: {'Yes' if result.get('qa_approved') else 'No'}")
+        print(f"\n Quality Score: {qa_score:.1f}/10 | Approved: {'✅ Yes' if result.get('qa_approved') else '❌ No'}")
         
         if result.get("qa_issues"):
-            print("\nIssues Found:")
+            print("\n  Issues Found:")
             for issue in result["qa_issues"]:
-                print(f"  - {issue}")
-        
-        if result.get("qa_suggestions"):
-            print("\nSuggestions:")
-            for suggestion in result["qa_suggestions"]:
-                print(f"  - {suggestion}")
+                print(f"   • {issue}")
     
-    # Final Status
-    print("\n" + "-" * 70)
-    print("STATUS")
-    print("-" * 70)
+    # Safety Checks
+    safety_violations = result.get("safety_violations", [])
+    if safety_violations:
+        print("\n  Safety Checks:")
+        for violation in safety_violations:
+            print(f" {violation}")
+    
+    # Final Status - CLEAR INDICATOR
+    print("\n" + "=" * 80)
     status = result.get("status", "unknown")
+    
     if status == "completed_approved":
         if result.get("feedback_saved"):
-            print("Feedback Logged")
+            print(" ACTION: Feedback Logged (not sent, just saved)")
         else:
-            print("Email Sent")
+            print(" ACTION: EMAIL SENT TO CUSTOMER")
     elif status == "requires_manual_review":
-        print("Needs Review")
+        print("  ACTION: FLAGGED FOR MANUAL REVIEW (email NOT sent)")
     elif status == "completed_skipped":
-        print("Skipped")
+        print("  ACTION: SKIPPED (no automated response)")
+    elif status == "error":
+        print("" ACTION: ERROR (email NOT sent)")
     else:
-        print(status)
+        print(f" ACTION: {status}")
     
-    print(f"Processing Time: {processing_time:.2f}s")
-    print("=" * 70)
+    print(f"  Processing Time: {processing_time:.2f}s")
+    print("=" * 80)
 
 
 def detect_escalation(response_text: str) -> bool:
@@ -204,8 +192,13 @@ def detect_escalation(response_text: str) -> bool:
     return any(keyword in response_lower for keyword in escalation_keywords)
 
 
-def process_and_respond(workflow: SupportWorkflow, email_handler: GmailHandler, email):
-    """Process an email and send response if approved."""
+def process_and_respond(workflow: SupportWorkflow, email_handler: GmailHandler, email) -> dict:
+    """
+    Process an email and send response if approved.
+    
+    Returns:
+        dict: Processing result with status information
+    """
     start_time = time.time()
     
     # Add LangSmith metadata if enabled
@@ -262,17 +255,22 @@ def process_and_respond(workflow: SupportWorkflow, email_handler: GmailHandler, 
     print_email_details(email, result, processing_time)
     
     # Handle based on status
+    email_sent = False
+    
     if result["status"] == "completed_skipped":
         email_handler.mark_as_read(email.id)
-        return
+        result["email_sent"] = False
+        return result
 
     if result["status"] == "error":
-        return
+        result["email_sent"] = False
+        return result
 
     if result["status"] == "requires_manual_review":
         if hasattr(email_handler, "add_label"):
             email_handler.add_label(email.id, "NEEDS_REVIEW")
-        return
+        result["email_sent"] = False
+        return result
 
     if result["status"] == "completed_approved" and result.get("final_response"):
         final_response = result["final_response"]
@@ -280,6 +278,7 @@ def process_and_respond(workflow: SupportWorkflow, email_handler: GmailHandler, 
 
         if not result.get("feedback_saved"):
             email_handler.send_reply(email=email, reply_body=final_response)
+            email_sent = True
 
         if is_escalation:
             if hasattr(email_handler, "add_label"):
@@ -288,6 +287,9 @@ def process_and_respond(workflow: SupportWorkflow, email_handler: GmailHandler, 
                 email_handler.mark_as_read(email.id)
         else:
             email_handler.mark_as_read(email.id)
+    
+    result["email_sent"] = email_sent
+    return result
 
 
 def run_continuous_monitoring(workflow: SupportWorkflow, email_handler: GmailHandler):
@@ -338,13 +340,47 @@ def run_batch_processing(workflow: SupportWorkflow, email_handler: GmailHandler)
 
     print(f"Found {len(emails)} email(s) to process\n")
 
+    # Track results
+    results_summary = {
+        "total": len(emails),
+        "sent": 0,
+        "manual_review": 0,
+        "skipped": 0,
+        "errors": 0,
+        "feedback_saved": 0
+    }
+
     for i, email in enumerate(emails, 1):
         print(f"\n[{i}/{len(emails)}]")
-        process_and_respond(workflow, email_handler, email)
+        result = process_and_respond(workflow, email_handler, email)
+        
+        # Track status
+        if result.get("email_sent"):
+            results_summary["sent"] += 1
+        elif result.get("feedback_saved"):
+            results_summary["feedback_saved"] += 1
+        elif result.get("status") == "requires_manual_review":
+            results_summary["manual_review"] += 1
+        elif result.get("status") == "completed_skipped":
+            results_summary["skipped"] += 1
+        elif result.get("status") == "error":
+            results_summary["errors"] += 1
 
         if i < len(emails):
             time.sleep(1)
 
+    # Show summary
+    print("\n" + "=" * 80)
+    print(" BATCH PROCESSING SUMMARY")
+    print("=" * 80)
+    print(f"Total Emails Processed: {results_summary['total']}")
+    print(f"Emails Sent: {results_summary['sent']}")
+    print(f"Feedback Saved: {results_summary['feedback_saved']}")
+    print(f"Manual Review: {results_summary['manual_review']}")
+    print(f"Skipped: {results_summary['skipped']}")
+    print(f"Errors: {results_summary['errors']}")
+    print("=" * 80)
+    
     # Show metrics summary
     get_tracker().print_summary()
 
