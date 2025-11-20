@@ -12,6 +12,10 @@ import time
 import os
 import logging
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # Suppress ChromaDB telemetry warnings (must be set before importing chromadb)
 os.environ["ANONYMIZED_TELEMETRY"] = "False"
@@ -19,6 +23,14 @@ os.environ["CHROMA_TELEMETRY"] = "False"
 
 # Suppress ChromaDB telemetry errors in logs
 logging.getLogger("chromadb.telemetry.product.posthog").setLevel(logging.CRITICAL)
+
+# Configure LangSmith tracing if enabled
+LANGSMITH_ENABLED = os.getenv("LANGCHAIN_TRACING_V2", "false").lower() == "true"
+if LANGSMITH_ENABLED and os.getenv("LANGSMITH_API_KEY"):
+    os.environ["LANGCHAIN_TRACING_V2"] = "true"
+    os.environ["LANGCHAIN_PROJECT"] = os.getenv("LANGSMITH_PROJECT", "product-support-agents")
+    if os.getenv("LANGSMITH_ENDPOINT"):
+        os.environ["LANGCHAIN_ENDPOINT"] = os.getenv("LANGSMITH_ENDPOINT")
 
 # # Add project root to path
 # sys.path.insert(0, str(Path(__file__).parent))
@@ -34,6 +46,14 @@ def print_banner():
     print("TaskFlow Pro - AI Customer Support Automation")
     print(f"Monitoring: {GMAIL_EMAIL}")
     print(f"Check interval: {CHECK_INTERVAL_SECONDS} seconds")
+    
+    # Show LangSmith status
+    if LANGSMITH_ENABLED:
+        project_name = os.getenv("LANGSMITH_PROJECT", "product-support-agents")
+        print(f"✓ LangSmith tracing enabled (project: {project_name})")
+        print(f"  View traces at: https://smith.langchain.com")
+    else:
+        print("○ LangSmith tracing disabled (set LANGCHAIN_TRACING_V2=true to enable)")
 
 
 def print_email_details(email, result, processing_time):
@@ -153,6 +173,14 @@ def process_and_respond(workflow: SupportWorkflow, email_handler: GmailHandler, 
     """Process an email and send response if approved."""
     start_time = time.time()
     
+    # Add LangSmith metadata if enabled
+    if LANGSMITH_ENABLED:
+        try:
+            from langsmith import traceable
+            from langsmith.run_helpers import get_current_run_tree
+        except ImportError:
+            pass
+    
     # Process email
     result = workflow.process_email(email)
     processing_time = time.time() - start_time
@@ -172,6 +200,28 @@ def process_and_respond(workflow: SupportWorkflow, email_handler: GmailHandler, 
     
     # Track metrics
     get_tracker().add_email_metrics(metrics)
+    
+    # Add metadata to LangSmith trace
+    if LANGSMITH_ENABLED:
+        try:
+            run = get_current_run_tree()
+            if run:
+                run.metadata.update({
+                    "email_id": email.id,
+                    "email_sender": email.sender,
+                    "email_subject": email.subject,
+                    "category": result.get("category"),
+                    "priority": result.get("priority"),
+                    "qa_score": result.get("qa_score", 0),
+                    "qa_approved": result.get("qa_approved", False),
+                    "processing_time_seconds": processing_time,
+                    "docs_retrieved": len(result.get("rag_sources", [])),
+                    "status": result.get("status"),
+                    "revision_count": result.get("revision_count", 0),
+                    "needs_review": result.get("status") == "requires_manual_review"
+                })
+        except Exception:
+            pass  # Silently fail if LangSmith is not available
     
     # Print details
     print_email_details(email, result, processing_time)
