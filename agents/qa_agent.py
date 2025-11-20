@@ -1,21 +1,20 @@
-"""Quality Assurance agent for reviewing email responses."""
+"""Quality Assurance agent for reviewing email responses with structured outputs."""
 
-from typing import Dict, Any
-from langchain.output_parsers import PydanticOutputParser
+from typing import Dict, Any, List
 from pydantic import BaseModel, Field
 import json
 import re
 
-from utils.unified_llm_loader import load_llm
+from utils.instructor_llm import get_structured_response
 
 
 class QAResult(BaseModel):
     """Quality assurance result schema."""
 
     approved: bool = Field(description="Whether the email response is approved for sending")
-    quality_score: float = Field(description="Overall quality score from 0 to 10")
-    issues: list[str] = Field(description="List of issues found (empty if none)")
-    suggestions: list[str] = Field(description="List of improvement suggestions (empty if none)")
+    quality_score: float = Field(description="Overall quality score from 0 to 10", ge=0, le=10)
+    issues: List[str] = Field(default_factory=list, description="List of issues found (empty if none)")
+    suggestions: List[str] = Field(default_factory=list, description="List of improvement suggestions (empty if none)")
     tone_assessment: str = Field(
         description="Assessment of the email tone (e.g., professional, empathetic, clear)"
     )
@@ -23,14 +22,10 @@ class QAResult(BaseModel):
 
 
 class QAAgent:
-    """Agent responsible for quality assurance of generated email responses."""
+    """Agent responsible for quality assurance of generated email responses with structured evaluation."""
 
     def __init__(self):
         """Initialize the QA agent."""
-        self.llm = load_llm(temperature=0.5, max_tokens=150)
-
-        self.parser = PydanticOutputParser(pydantic_object=QAResult)
-
         self.prompt = """Evaluate this support email response. Score 0-10 where 8-10=approve, 0-7=reject.
 
 EVALUATION RULES:
@@ -79,37 +74,15 @@ Evaluate THIS specific response above. Do not use examples."""
 
         formatted_prompt = self.prompt.format(customer_body=customer_body, response=response_text)
 
-        raw_response = self.llm.invoke(formatted_prompt)
-
-        if hasattr(raw_response, "content"):
-            llm_response = raw_response.content
-        else:
-            llm_response = raw_response
-
         try:
-            json_match = re.search(r"\{(?:[^{}]|(?:\{[^{}]*\}))*\}", llm_response, re.DOTALL)
-            if json_match:
-                json_str = json_match.group()
-                result_dict = json.loads(json_str)
-
-                # Check if this is actual data or schema (same issue as classifier)
-                if "title" in result_dict and "description" in result_dict:
-                    # LLM returned schema instead of data
-                    print("Warning: LLM returned JSON schema instead of QA evaluation")
-                    print(f"Full response: {llm_response[:300]}...")
-                    # Fall back to simple evaluation
-                    return self._fallback_qa_result(generated_response)
-
-                result = QAResult(**result_dict)
-            else:
-                # Try parsing the entire response
-                result_dict = json.loads(llm_response)
-
-                # Check for schema
-                if "title" in result_dict:
-                    return self._fallback_qa_result(generated_response)
-
-                result = QAResult(**result_dict)
+            # Use instructor for structured output - automatically validates and returns Pydantic model
+            qa_result = get_structured_response(
+                prompt=formatted_prompt,
+                response_model=QAResult,
+                temperature=0.5,
+                max_tokens=300
+            )
+            return qa_result
 
         except json.JSONDecodeError as e:
             print(f"Error parsing QA JSON: {e}")

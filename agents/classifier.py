@@ -1,14 +1,12 @@
-"""Email classification agent."""
+"""Email classification agent with structured outputs using Instructor."""
 
 from typing import Dict, Any
-from langchain.prompts import PromptTemplate
-from langchain.output_parsers import PydanticOutputParser
 from pydantic import BaseModel, Field
 import json
 import re
 
 from utils.config import EMAIL_CATEGORIES
-from utils.unified_llm_loader import load_llm
+from utils.instructor_llm import get_structured_response
 
 
 class EmailClassification(BaseModel):
@@ -23,14 +21,10 @@ class EmailClassification(BaseModel):
 
 
 class EmailClassifierAgent:
-    """Agent responsible for classifying incoming support emails."""
+    """Agent responsible for classifying incoming support emails with structured outputs."""
 
     def __init__(self):
         """Initialize the classifier agent."""
-        self.llm = load_llm(temperature=0.3, max_tokens=128)
-
-        self.parser = PydanticOutputParser(pydantic_object=EmailClassification)
-
         self.prompt_template = """You are an expert email classification agent for TaskFlow Pro, a project management SaaS platform.
 
 Classify the email into ONE of these categories:
@@ -115,37 +109,15 @@ DO NOT return the JSON schema. Return actual values."""
             body=email_data.get("body", "")[:500],  # Limit body length for better focus
         )
 
-        raw_response = self.llm.invoke(prompt)
-
-        if hasattr(raw_response, "content"):
-            response = raw_response.content
-        else:
-            response = raw_response
-
         try:
-            json_match = re.search(r"\{(?:[^{}]|(?:\{[^{}]*\}))*\}", response, re.DOTALL)
-            if json_match:
-                json_str = json_match.group()
-                result_dict = json.loads(json_str)
-
-                # Check if this is actual data or schema
-                if "title" in result_dict and "description" in result_dict:
-                    # LLM returned schema instead of data
-                    print("Warning: LLM returned JSON schema instead of classification")
-                    print(f"Full response: {response[:300]}...")
-                    # Fall back to keyword-based classification
-                    return self._fallback_classification(email_data)
-
-                return EmailClassification(**result_dict)
-            else:
-                # Try to parse the entire response
-                result_dict = json.loads(response)
-
-                # Check for schema
-                if "title" in result_dict:
-                    return self._fallback_classification(email_data)
-
-                return EmailClassification(**result_dict)
+            # Use instructor for structured output - automatically validates and returns Pydantic model
+            classification = get_structured_response(
+                prompt=prompt,
+                response_model=EmailClassification,
+                temperature=0.3,
+                max_tokens=256
+            )
+            return classification
 
         except json.JSONDecodeError as e:
             print(f"Error parsing classification JSON: {e}")

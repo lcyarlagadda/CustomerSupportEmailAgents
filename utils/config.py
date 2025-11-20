@@ -13,12 +13,9 @@ DATA_DIR = PROJECT_ROOT / "data"
 PRODUCT_DOCS_DIR = DATA_DIR / "product_docs"
 VECTOR_DB_DIR = PROJECT_ROOT / "vectorstore"
 
-# LLM Configuration
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq")
+# LLM Configuration (Groq API)
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-LLM_MODEL = os.getenv("LLM_MODEL", "meta-llama/Llama-3.2-1B-Instruct")
-USE_GPU = os.getenv("USE_GPU", "auto")
 LLM_TEMPERATURE = 0.7
 
 # Embedding Configuration
@@ -71,18 +68,11 @@ def validate_config():
     if not PRODUCT_DOCS_DIR.exists():
         errors.append(f"Product documentation directory not found: {PRODUCT_DOCS_DIR}")
 
-    # Check if transformers is installed
-    try:
-        import transformers
-    except ImportError:
-        errors.append("transformers package not found. Run: pip install transformers torch")
-
-    # Warn if HuggingFace token not set (needed for gated models)
-    hf_token = os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_TOKEN")
-    if not hf_token and "meta-llama" in LLM_MODEL.lower():
+    # Check if Groq API key is set
+    if not GROQ_API_KEY:
         warnings.append(
-            "HuggingFace token not found. For gated models (Llama), set HF_TOKEN in .env\n"
-            "  Get token at: https://huggingface.co/settings/tokens"
+            "Groq API key not found. Set GROQ_API_KEY in .env file\n"
+            "  Get free API key at: https://console.groq.com"
         )
 
     if errors:
