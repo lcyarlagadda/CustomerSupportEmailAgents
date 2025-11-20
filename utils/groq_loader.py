@@ -81,8 +81,8 @@ def load_groq_llm(model_name: str, temperature: Optional[float] = None, max_toke
     # Cache the instance
     _groq_cache[cache_key] = llm
 
-    print(f" Groq model '{model_name}' loaded successfully")
-    print(f"  Speed: 300-500 tokens/second")
-    print(f"  Free tier: 14,400 requests/day")
+    # Suppress verbose output for cleaner logs
+    # Only print on first initialization if needed
+    # print(f"✓ Groq model '{model_name}' loaded")
 
     return llm

@@ -61,12 +61,12 @@ class ResponseAgent:
             try:
                 from sentence_transformers import CrossEncoder
                 self.reranker = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
-                print("✓ Response Agent: Reranking enabled")
+                # print("✓ Response Agent: Reranking enabled")  # Suppressed for cleaner output
             except ImportError:
                 print("⚠ Response Agent: sentence-transformers not found, reranking disabled")
                 self.use_reranking = False
             except Exception as e:
-                print(f"⚠ Response Agent: Could not load reranker: {e}")
+                # print(f"⚠ Response Agent: Could not load reranker: {e}")
                 self.use_reranking = False
         
         # Response format template

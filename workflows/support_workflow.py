@@ -68,7 +68,8 @@ class SupportWorkflow:
         self.use_parallel = use_parallel
         self.use_cache = use_cache
 
-        print("Initializing system...")
+        # Suppress verbose initialization messages
+        # print("Initializing system...")
         self.classifier = EmailClassifierAgent()
         self.response_agent = ResponseAgent(
             use_reranking=True,
@@ -84,7 +85,7 @@ class SupportWorkflow:
             self.response_cache = ResponseCache()
             self.response_cache.clear_expired()
         
-        print("System ready\n")
+        print("✓ System initialized\n")
 
         # Build the workflow graph
         self.graph = self._build_graph()

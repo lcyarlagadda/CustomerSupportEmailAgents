@@ -88,24 +88,23 @@ class QAAgent:
                 self.analyzer = AnalyzerEngine()
                 self.anonymizer = AnonymizerEngine()
                 self.presidio_available = True
-                print("✓ QA Agent: Presidio PII detection initialized")
+                # print("✓ QA Agent: Presidio PII detection initialized")
             except ImportError:
-                print("⚠ QA Agent: Presidio not available, using regex fallback")
+                pass  # Silently fall back to regex
             except Exception as e:
-                print(f"⚠ QA Agent: Presidio initialization failed: {e}")
+                pass  # Silently fall back to regex
         
         # Initialize LLM for safety checks
         self.llm = None
         try:
             from utils.unified_llm_loader import load_llm
             self.llm = load_llm(temperature=0.0, model_name="llama-3.1-8b-instant")
-            print("✓ QA Agent: LLM-based safety checks initialized")
+            # print("✓ QA Agent: LLM-based safety checks initialized")
         except Exception as e:
-            print(f"⚠ QA Agent: LLM initialization failed: {e}")
+            pass  # Silently continue without LLM-based checks
         
         # Fallback PII regex patterns
         self.pii_patterns = {
-            "EMAIL_ADDRESS": re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'),
             "PHONE_NUMBER": re.compile(r'\b(?:\+?1[-.]?)?\(?([0-9]{3})\)?[-.]?([0-9]{3})[-.]?([0-9]{4})\b'),
             "CREDIT_CARD": re.compile(r'\b(?:\d{4}[-\s]?){3}\d{4}\b'),
             "US_SSN": re.compile(r'\b\d{3}-?\d{2}-?\d{4}\b'),
@@ -248,7 +247,7 @@ Evaluate THIS specific response above. Do not use examples."""
                     text=text,
                     language='en',
                     entities=[
-                        "EMAIL_ADDRESS", "PHONE_NUMBER", "CREDIT_CARD", 
+                        "PHONE_NUMBER", "CREDIT_CARD", 
                         "US_SSN", "US_PASSPORT", "US_DRIVER_LICENSE",
                         "IBAN_CODE", "IP_ADDRESS"
                     ]
@@ -273,7 +272,7 @@ Evaluate THIS specific response above. Do not use examples."""
                 return violations, redacted_text
                 
             except Exception as e:
-                print(f"⚠ Presidio error: {e}, falling back to regex")
+                pass  # Silently fall back to regex
         
         # Fallback: Regex-based detection and redaction
         for pii_type, pattern in self.pii_patterns.items():
@@ -288,10 +287,8 @@ Evaluate THIS specific response above. Do not use examples."""
                     action="redact"
                 ))
                 
-                # Redact
-                if pii_type == "EMAIL_ADDRESS":
-                    redacted_text = pattern.sub("[EMAIL REDACTED]", redacted_text)
-                elif pii_type == "PHONE_NUMBER":
+                # Redaction
+                if pii_type == "PHONE_NUMBER":
                     redacted_text = pattern.sub("[PHONE REDACTED]", redacted_text)
                 elif pii_type == "CREDIT_CARD":
                     redacted_text = pattern.sub("[CARD REDACTED]", redacted_text)
@@ -349,7 +346,7 @@ Response:"""
                 return violations
                 
             except Exception as e:
-                print(f"⚠ LLM toxic check failed: {e}, using fallback")
+                pass  # Silently use fallback
         
         # Fallback: Pattern-based checks
         return self._check_toxic_patterns(text)

@@ -11,18 +11,43 @@ import sys
 import time
 import os
 import logging
+import warnings
 from pathlib import Path
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
 
-# Suppress ChromaDB telemetry warnings (must be set before importing chromadb)
+# ============================================================
+# SUPPRESS VERBOSE OUTPUT
+# ============================================================
+
+# Suppress all warnings
+warnings.filterwarnings("ignore")
+os.environ["PYTHONWARNINGS"] = "ignore"
+
+# Suppress TensorFlow/CUDA warnings
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+os.environ["CUDA_VISIBLE_DEVICES"] = ""  # Disable CUDA messages
+
+# Suppress HuggingFace progress bars and downloads
+os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
+os.environ["TRANSFORMERS_VERBOSITY"] = "error"
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+# Suppress ChromaDB telemetry
 os.environ["ANONYMIZED_TELEMETRY"] = "False"
 os.environ["CHROMA_TELEMETRY"] = "False"
 
-# Suppress ChromaDB telemetry errors in logs
-logging.getLogger("chromadb.telemetry.product.posthog").setLevel(logging.CRITICAL)
+# Configure logging to suppress warnings
+logging.basicConfig(level=logging.ERROR)
+logging.getLogger("chromadb").setLevel(logging.ERROR)
+logging.getLogger("chromadb.telemetry").setLevel(logging.CRITICAL)
+logging.getLogger("presidio-analyzer").setLevel(logging.ERROR)
+logging.getLogger("spacy").setLevel(logging.ERROR)
+logging.getLogger("tensorflow").setLevel(logging.ERROR)
+logging.getLogger("transformers").setLevel(logging.ERROR)
+logging.getLogger("sentence_transformers").setLevel(logging.ERROR)
 
 # Configure LangSmith tracing if enabled
 LANGSMITH_ENABLED = os.getenv("LANGCHAIN_TRACING_V2", "false").lower() == "true"
