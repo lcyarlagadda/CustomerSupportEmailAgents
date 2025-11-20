@@ -874,16 +874,6 @@ class MockEmailHandler:
         if "<" in to_email:
             to_email = to_email.split("<")[1].split(">")[0]
 
-        print(f"\n" + "=" * 60)
-        print("[MOCK] SENDING EMAIL REPLY")
-        print("=" * 60)
-        print(f"To: {to_email}")
-        print(f"Subject: {reply_subject}")
-        print(f"Thread ID: {getattr(email, 'thread_id', email.id)}")
-        print("-" * 60)
-        print(reply_body[:200] + "..." if len(reply_body) > 200 else reply_body)
-        print("=" * 60)
-        print("[MOCK] (Email not actually sent in mock mode)\n")
 
     def mark_as_read(self, email_id: str) -> bool:
         """

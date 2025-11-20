@@ -9,6 +9,7 @@ from langgraph.graph import StateGraph, END
 from agents.classifier import EmailClassifierAgent
 from agents.response_agent import ResponseAgent
 from agents.qa_agent import QAAgent
+from agents.database_agent import get_database_agent
 from utils.email_handler import Email
 from utils.parallel_utils import ParallelExecutor
 from utils.response_cache import ResponseCache
@@ -77,6 +78,7 @@ class SupportWorkflow:
             use_hybrid_search=True,
         )
         self.qa_agent = QAAgent()
+        self.database_agent = get_database_agent()
 
         if use_parallel:
             self.parallel_executor = ParallelExecutor(max_workers=2)
@@ -163,12 +165,32 @@ class SupportWorkflow:
         return state
 
     def retrieve_context(self, state: SupportState) -> SupportState:
-        """Retrieve relevant context using RAG with metadata filtering."""
+        """Retrieve relevant context using RAG with metadata filtering and database lookup."""
         email = state["email"]
         category = state["category"]
         
         # Track enhanced queries
         enhanced_queries = {}
+
+        # Check database first for billing/membership queries
+        if self.database_agent.should_check_database(category, email.body):
+            print(f"\n[Workflow] Category '{category}' requires database check")
+            account = self.database_agent.get_customer_by_email(email.sender)
+            
+            if account:
+                # Use database information as context
+                db_context = self.database_agent.format_account_context(account)
+                state["rag_context"] = db_context
+                state["rag_sources"] = [{
+                    "source": "Customer Database",
+                    "type": "database",
+                    "customer_id": account.customer_id
+                }]
+                state["enhanced_queries"] = {"database": "Used customer database"}
+                print(f"[Workflow] Using database context for response")
+                return state
+            else:
+                print(f"[Workflow] Customer not found in database, falling back to documentation")
 
         # For product inquiries, use RAG heavily
         if category == "product_inquiry":

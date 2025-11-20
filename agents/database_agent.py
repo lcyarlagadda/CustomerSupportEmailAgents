@@ -50,6 +50,10 @@ class DatabaseAgent:
     
     Retrieves real-time customer data for billing, account, and membership queries.
     Perfect for development, testing, and Colab environments.
+    
+    SECURITY: This agent only executes SELECT queries (read-only).
+    No INSERT, UPDATE, DELETE, or other write operations are permitted.
+    All queries are parameterized to prevent SQL injection.
     """
     
     def __init__(self, use_cache: bool = True, db_path: str = "customer_data.db"):
@@ -265,11 +269,14 @@ class DatabaseAgent:
         Returns:
             CustomerAccount or None if not found
         """
+        print(f"\n[Database] Checking database for customer: {email}")
+        
         # Check cache first
         if self.cache:
             try:
                 cached = self.cache.get(f"customer:{email}")
                 if cached:
+                    print(f"[Database] Cache hit for {email}")
                     data = json.loads(cached)
                     return self._dict_to_account(data)
             except Exception:
@@ -278,6 +285,7 @@ class DatabaseAgent:
         # Query database
         if self.db_connection:
             try:
+                print(f"[Database] Executing SELECT query for {email}")
                 cursor = self.db_connection.cursor()
                 
                 cursor.execute("""
@@ -324,6 +332,11 @@ class DatabaseAgent:
                         plan_limits=json.loads(row['plan_limits'])
                     )
                     
+                    print(f"[Database] Found customer: {account.name}")
+                    print(f"[Database]   Plan: {account.plan_name} (${account.plan_price}/{account.billing_cycle})")
+                    print(f"[Database]   Status: {account.status}")
+                    print(f"[Database]   Next billing: {account.next_billing_date.strftime('%Y-%m-%d')}")
+                    
                     # Cache result
                     if self.cache:
                         try:
@@ -337,16 +350,19 @@ class DatabaseAgent:
                             pass
                     
                     return account
+                else:
+                    print(f"[Database] No customer found for {email}")
                 
             except Exception as e:
-                print(f"Database query error: {e}")
+                print(f"[Database] Query error: {e}")
                 return None
         
+        print(f"[Database] Database not connected, skipping lookup")
         return None
     
     def get_recent_invoices(self, customer_id: str, limit: int = 5) -> List[Dict[str, Any]]:
         """
-        Get recent invoices for a customer.
+        Get recent invoices for a customer (READ-ONLY).
         
         Args:
             customer_id: Customer ID
@@ -359,8 +375,10 @@ class DatabaseAgent:
             return []
         
         try:
+            print(f"[Database] Fetching {limit} recent invoices for customer {customer_id}")
             cursor = self.db_connection.cursor()
             
+            # READ-ONLY: SELECT query only
             cursor.execute("""
                 SELECT 
                     invoice_id,
@@ -376,10 +394,12 @@ class DatabaseAgent:
                 LIMIT ?
             """, (customer_id, limit))
             
-            return [dict(row) for row in cursor.fetchall()]
+            invoices = [dict(row) for row in cursor.fetchall()]
+            print(f"[Database] Found {len(invoices)} invoices")
+            return invoices
             
         except Exception as e:
-            print(f"Invoice query error: {e}")
+            print(f"[Database] Invoice query error: {e}")
             return []
     
     def format_account_context(self, account: CustomerAccount) -> str:
