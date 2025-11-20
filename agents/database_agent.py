@@ -217,20 +217,25 @@ class DatabaseAgent:
         try:
             import redis
             
+            redis_host = os.getenv("REDIS_HOST", "localhost")
+            redis_port = int(os.getenv("REDIS_PORT", "6379"))
+            
             self.cache = redis.Redis(
-                host=os.getenv("REDIS_HOST", "localhost"),
-                port=int(os.getenv("REDIS_PORT", "6379")),
+                host=redis_host,
+                port=redis_port,
                 db=0,
                 decode_responses=True
             )
             self.cache.ping()
-            print("Database Agent: Redis cache connected")
+            print(f"[Database] Redis cache connected ({redis_host}:{redis_port})")
             
         except ImportError:
-            # print("  Database Agent: redis not installed, caching disabled")
+            print("[Database] Redis not installed - caching disabled (install: pip install redis)")
             self.cache = None
         except Exception as e:
-            # print(f"  Database Agent: Redis connection failed ({e}), caching disabled")
+            print(f"[Database] Redis connection failed - caching disabled")
+            print(f"[Database]   Error: {e}")
+            print(f"[Database]   Tip: Check REDIS_HOST and REDIS_PORT in .env or start Redis server")
             self.cache = None
     
     def should_check_database(self, category: str, query: str) -> bool:
@@ -276,10 +281,13 @@ class DatabaseAgent:
             try:
                 cached = self.cache.get(f"customer:{email}")
                 if cached:
-                    print(f"[Database] Cache hit for {email}")
+                    print(f"[Database] Cache hit - returning cached data for {email}")
                     data = json.loads(cached)
                     return self._dict_to_account(data)
-            except Exception:
+                else:
+                    print(f"[Database] Cache miss - querying database")
+            except Exception as e:
+                print(f"[Database] Cache error: {e}")
                 pass
         
         # Query database
@@ -352,13 +360,14 @@ class DatabaseAgent:
                     return account
                 else:
                     print(f"[Database] No customer found for {email}")
+                    return None
                 
             except Exception as e:
                 print(f"[Database] Query error: {e}")
                 return None
-        
-        print(f"[Database] Database not connected, skipping lookup")
-        return None
+        else:
+            print(f"[Database] Database not connected, skipping lookup")
+            return None
     
     def get_recent_invoices(self, customer_id: str, limit: int = 5) -> List[Dict[str, Any]]:
         """
