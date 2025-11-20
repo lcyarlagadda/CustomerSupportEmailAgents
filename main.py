@@ -113,7 +113,7 @@ def print_email_details(email, result, processing_time):
     # QA Results (compact)
     qa_score = result.get('qa_score', 0)
     if qa_score > 0:
-        print(f"\n Quality Score: {qa_score:.1f}/10 | Approved: {'✅ Yes' if result.get('qa_approved') else '❌ No'}")
+        print(f"\n Quality Score: {qa_score:.1f}/10 | Approved: {'Yes' if result.get('qa_approved') else 'No'}")
         
         if result.get("qa_issues"):
             print("\n  Issues Found:")
@@ -141,7 +141,7 @@ def print_email_details(email, result, processing_time):
     elif status == "completed_skipped":
         print("  ACTION: SKIPPED (no automated response)")
     elif status == "error":
-        print("" ACTION: ERROR (email NOT sent)")
+        print(" ACTION: ERROR (email NOT sent)")
     else:
         print(f" ACTION: {status}")
     

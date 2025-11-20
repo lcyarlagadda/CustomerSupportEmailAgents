@@ -143,13 +143,13 @@ class DatabaseAgent:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_invoices_customer ON invoices(customer_id)")
             
             self.db_connection.commit()
-            print("✓ Database Agent: SQLite connected")
+            print("Database Agent: SQLite connected")
             
             # Add sample data if database is empty
             self._add_sample_data_if_empty()
             
         except Exception as e:
-            print(f"⚠️  Database Agent: SQLite initialization failed ({e})")
+            print(f"Warning: Database Agent: SQLite initialization failed ({e})")
             self.db_connection = None
     
     def _add_sample_data_if_empty(self):
@@ -220,7 +220,7 @@ class DatabaseAgent:
                 decode_responses=True
             )
             self.cache.ping()
-            print("✓ Database Agent: Redis cache connected")
+            print("Database Agent: Redis cache connected")
             
         except ImportError:
             # print("  Database Agent: redis not installed, caching disabled")

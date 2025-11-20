@@ -85,7 +85,7 @@ class SupportWorkflow:
             self.response_cache = ResponseCache()
             self.response_cache.clear_expired()
         
-        print("✓ System initialized\n")
+        print("System initialized\n")
 
         # Build the workflow graph
         self.graph = self._build_graph()
