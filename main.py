@@ -50,10 +50,10 @@ def print_banner():
     # Show LangSmith status
     if LANGSMITH_ENABLED:
         project_name = os.getenv("LANGSMITH_PROJECT", "product-support-agents")
-        print(f"✓ LangSmith tracing enabled (project: {project_name})")
+        print(f" LangSmith tracing enabled (project: {project_name})")
         print(f"  View traces at: https://smith.langchain.com")
     else:
-        print("○ LangSmith tracing disabled (set LANGCHAIN_TRACING_V2=true to enable)")
+        print("LangSmith tracing disabled (set LANGCHAIN_TRACING_V2=true to enable)")
 
 
 def print_email_details(email, result, processing_time):
@@ -85,6 +85,41 @@ def print_email_details(email, result, processing_time):
         print("RESPONSE")
         print("-" * 70)
         print(response)
+        
+        # Show if response was redacted
+        if result.get("response_redacted"):
+            print("\n  Response was automatically redacted to remove sensitive information")
+    
+    # Guardrails Check
+    guardrail_violations = result.get("guardrail_violations", [])
+    if guardrail_violations:
+        print(" SAFETY CHECKS")
+        
+        # Group by severity
+        critical = [v for v in guardrail_violations if v.severity == "critical"]
+        high = [v for v in guardrail_violations if v.severity == "high"]
+        medium = [v for v in guardrail_violations if v.severity == "medium"]
+        low = [v for v in guardrail_violations if v.severity == "low"]
+        
+        if critical:
+            print("\n CRITICAL Issues:")
+            for v in critical:
+                print(f"  - {v.check_type}: {v.message}")
+        
+        if high:
+            print("\n  HIGH Priority:")
+            for v in high:
+                print(f"  - {v.check_type}: {v.message}")
+        
+        if medium:
+            print("\n MEDIUM Priority:")
+            for v in medium:
+                print(f"  - {v.check_type}: {v.message}")
+        
+        if low:
+            print("\n  LOW Priority:")
+            for v in low:
+                print(f"  - {v.check_type}: {v.message}")
     
     # QA Results
     qa_score = result.get('qa_score', 0)

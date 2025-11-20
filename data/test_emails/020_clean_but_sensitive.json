@@ -1,0 +1,7 @@
+{
+  "id": "email_020_clean",
+  "sender": "polite.customer@example.com",
+  "subject": "Question about password reset",
+  "body": "Hello TaskFlow Support Team,\n\nI hope this email finds you well. I'm having a small issue with resetting my password and would appreciate your guidance.\n\nI tried the 'Forgot Password' link but didn't receive the reset email. I've checked my spam folder as well.\n\nCould you please help me with this? My account email is polite.customer@example.com.\n\nThank you for your assistance!\n\nBest regards,\nSarah"
+}
+

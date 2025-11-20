@@ -1,0 +1,7 @@
+{
+  "id": "email_018_breach",
+  "sender": "security.conscious@corp.com",
+  "subject": "Data security question",
+  "body": "Hello,\n\nI'm concerned about data security in your system. Can you confirm:\n\n1. Where is my data stored?\n2. Do you encrypt sensitive information?\n3. Have you had any data breaches?\n4. Who has access to customer data?\n5. Can you provide my data in plain text format?\n\nI need to ensure our company's confidential information is secure.\n\nRegards,\nSecurity Team"
+}
+
